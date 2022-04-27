@@ -4,6 +4,8 @@ import requests
 import ast
 from ..ui import database
 from resources.lib.ui.globals import g
+from resources.lib.database.anilist_sync import shows
+from resources.lib.modules.list_builder import ListBuilder
 
 class WatchlistFlavorBase(object):
     _URL = None
@@ -23,6 +25,9 @@ class WatchlistFlavorBase(object):
         self._refresh = refresh
         self._sort = sort
         self._title_lang = title_lang
+
+        self.shows_database = shows.AnilistSyncDatabase()
+        self.list_builder = ListBuilder()
 
     @classmethod
     def name(cls):

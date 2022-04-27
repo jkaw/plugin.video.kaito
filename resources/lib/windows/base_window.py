@@ -4,8 +4,8 @@ __metaclass__ = type
 
 import os
 
-from resources.lib.ui import database
 from resources.lib.ui.globals import g
+from resources.lib.ui import control
 import ast
 import xbmcgui
 
@@ -32,7 +32,7 @@ class BaseWindow(xbmcgui.WindowXMLDialog):
             return
 
         if actionArgs.get('anilist_id'):
-            self.item_information = ast.literal_eval(database.get_show(actionArgs['anilist_id'])['kodi_meta'])
+            self.item_information = control.get_item_information(actionArgs["anilist_id"])
         elif actionArgs.get('playnext'):
             self.item_information = actionArgs
         else:
@@ -41,10 +41,16 @@ class BaseWindow(xbmcgui.WindowXMLDialog):
         #for id, value in self.item_information['ids'].items():
         self.setProperty('item.ids.%s_id' % 1, str('gh'))
 
+        try:
+            for i in self.item_information['art'].keys():
+                self.setProperty('item.art.{}'.format(i), g.UNICODE(self.item_information['art'][i]))
+        except:
+            pass
+
         #for i in self.item_information['art'].keys():
-        self.setProperty('item.art.%s' % 'thumb', self.item_information.get('thumb'))
-        self.setProperty('item.art.%s' % 'poster', self.item_information.get('poster'))
-        self.setProperty('item.art.%s' % 'fanart', self.item_information.get('fanart'))
+        # self.setProperty('item.art.%s' % 'thumb', self.item_information.get('thumb'))
+        # self.setProperty('item.art.%s' % 'poster', self.item_information.get('poster'))
+        # self.setProperty('item.art.%s' % 'fanart', self.item_information.get('fanart'))
         self.setProperty('item.info.%s' % 'title', self.item_information.get('name'))
 
         #self.item_information['info'] = tools.clean_air_dates(self.item_information['info'])

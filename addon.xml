@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.kaito" name="kaito" provider-name="SwagOtaku" version="0.0.10">
+<addon id="plugin.video.kaito" name="kaito" provider-name="SwagOtaku" version="0.0.11+matrix.1">
   <requires>
-    <import addon="xbmc.python" version="2.26.0" />
-    <import addon="script.module.future" version="0.17.1"/>
-    <import addon="script.module.requests" version="2.22.0" />
-    <import addon="script.module.beautifulsoup4" version="4.9.3" />
-    <import addon="script.common.plugin.cache" version="2.5.5" />
-    <import addon="script.module.inputstreamhelper" version="0.5.2" />
-    <import addon="context.kaito" version="0.0.3"/>	  
+    <import addon="xbmc.python" version="3.0.0" />
+    <import addon="script.module.future" version="0.17.1+matrix.1"/>
+    <import addon="script.module.requests" version="2.22.0+matrix.1" />
+    <import addon="script.module.beautifulsoup4" version="4.9.3+matrix.1" />
+    <import addon="script.common.plugin.cache" version="2.5.5+matrix.1" />
+    <import addon="script.module.inputstreamhelper" version="0.5.2+matrix.1" />
+    <import addon="script.module.myconnpy" version="1.1.7"/>
   </requires>
   <extension library="default.py" point="xbmc.python.pluginsource">
         <provides>video</provides>
@@ -24,6 +24,17 @@
 			<fanart>fanart.jpg</fanart>
 		</assets>
     <news>
+Changelog 0.0.11:
+Updated nyaa scraping
+Updated parsing filename (credits: igorcmoura/anitopy)
+Updated Next Up
+Added Fanart.Tv support (Clear Logos)
+Added a4ksubtitles support
+Added Skip Intro Automatic close popup
+Fixed Non-Debrid sources (gogo embed
+Fixed [Bug] Next Up: Please update your app
+Updated tvshow/episode builder (credits: seren/nixgates)
+
 Changelog 0.0.10:
 Refactor code for Kodi 19 support
 Add setting to toggle reuselanguageinvoker (If enabled, expect some instability but much faster menu speeds)

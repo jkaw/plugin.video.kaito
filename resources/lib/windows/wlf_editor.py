@@ -9,10 +9,10 @@ from resources.lib.WatchlistFlavor import WatchlistFlavor
 from resources.lib.ui import database
 import xbmcgui
 
-class SourceSelect(BaseWindow):
+class WatchlistFlavorEditor(BaseWindow):
 
     def __init__(self, xml_file, location, actionArgs=None, sources=None, anilist_id=None, rescrape=None, **kwargs):
-        super(SourceSelect, self).__init__(xml_file, location, actionArgs=actionArgs)
+        super(WatchlistFlavorEditor, self).__init__(xml_file, location, actionArgs=actionArgs)
         self.actionArgs = actionArgs
         self.sources = sources
         self.anilist_id = anilist_id
@@ -23,6 +23,9 @@ class SourceSelect(BaseWindow):
         self.editor_list = None
         self.flavors_list = None
         self.anime_item = None
+        self.status = None
+        self.eps_watched = None
+        self.score = None
         self.last_action = 0
         g.close_busy_dialog()
 
@@ -35,21 +38,21 @@ class SourceSelect(BaseWindow):
             menu_item.setProperty('username', g.get_setting('anilist.username'))
             self.flavors_list.addItem(menu_item)
 
-            self.anime_list_entry['anilist'] = WatchlistFlavor.watchlist_anime_entry_request('anilist', '235')
+            self.anime_list_entry['anilist'] = WatchlistFlavor.watchlist_anime_entry_request('anilist', 235)
 
         if g.kitsu_enabled():
             menu_item = xbmcgui.ListItem(label='%s' % 'Kitsu')
             menu_item.setProperty('username', g.get_setting('kitsu.username'))
             self.flavors_list.addItem(menu_item)
 
-            self.anime_list_entry['kitsu'] = WatchlistFlavor.watchlist_anime_entry_request('kitsu', '235')
+            self.anime_list_entry['kitsu'] = WatchlistFlavor.watchlist_anime_entry_request('kitsu', 235)
 
         if g.myanimelist_enabled():
-            menu_item = xbmcgui.ListItem(label='%s' % 'MyAnimeList')
+            menu_item = xbmcgui.ListItem(label='%s' % 'MAL')
             menu_item.setProperty('username', g.get_setting('mal.username'))
             self.flavors_list.addItem(menu_item)
 
-            self.anime_list_entry['myanimelist'] = WatchlistFlavor.watchlist_anime_entry_request('mal', '235')
+            self.anime_list_entry['mal'] = WatchlistFlavor.watchlist_anime_entry_request('mal', 235)
 
         selected_flavor_item = self.flavors_list.getSelectedItem()
         self.selected_flavor = (selected_flavor_item.getLabel()).lower()
@@ -61,7 +64,7 @@ class SourceSelect(BaseWindow):
         self.setFocusId(2000)
 
     def doModal(self):
-        super(SourceSelect, self).doModal()
+        super(WatchlistFlavorEditor, self).doModal()
         self.clearProperties()
         return
   
@@ -76,20 +79,20 @@ class SourceSelect(BaseWindow):
 
     def edit_anime(self):
         self.anime_item = self.editor_list.getSelectedItem()
-        status = self.anime_item.getProperty('status')
-        eps_watched = self.anime_item.getProperty('eps_watched')
-        score = self.anime_item.getProperty('score')
+        self.status = self.anime_item.getProperty('status')
+        self.eps_watched = self.anime_item.getProperty('eps_watched')
+        self.score = self.anime_item.getProperty('score')
 
-        if status:
-            self.flip_status(status)
+        if self.status:
+            self.flip_status()
 
-        if eps_watched:
+        if self.eps_watched:
             self.edit_eps_watched()
 
-        if score:
-            self.flip_score(score)
+        if self.score:
+            self.flip_score()
 
-    def flip_status(self, status):
+    def flip_status(self):
         status_dict = {
             'anilist': {
                 'Planning': 'Current',
@@ -99,6 +102,13 @@ class SourceSelect(BaseWindow):
                 'Paused': 'Dropped',
                 'Dropped': 'Planning'
                 },
+            'kitsu': {
+                'Planned': 'Current',
+                'Current': 'Completed',
+                'Completed': 'On_Hold',
+                'On_Hold': 'Dropped',
+                'Dropped': 'Planned'
+            },
             'myanimelist': {
                 'Plan_To_Watch': 'Watching',
                 'Watching': 'Completed',
@@ -124,31 +134,34 @@ class SourceSelect(BaseWindow):
 ##            new_status = 'Plan to Watch'
 
         try:
-            new_status = status_dict[self.selected_flavor][status]
+            new_status = status_dict[self.selected_flavor][self.status]
             self.anime_item.setProperty('status', new_status)
+            self.status = new_status
         except:
             pass
 
     def edit_eps_watched(self):
         episodes_watched = xbmcgui.Dialog().numeric(0, 'Enter episodes watched')
         if not episodes_watched:
-            episodes_watched = '0'
+            episodes_watched = self.eps_watched
         self.anime_item.setProperty('eps_watched', str(episodes_watched))
+        self.eps_watched = episodes_watched
 
-    def flip_score(self, score):
+    def flip_score(self):
 
-        if score == 'null' or '0':
+        if self.score == 'null' or '0':
             new_score = '1'
 
-        if score != 'null' and 1 <= int(score) < 10:
-            new_score = int(score) + 1
+        if self.score != 'null' and 1 <= int(self.score) < 10:
+            new_score = int(self.score) + 1
 
-        if score == '10':
+        if self.score == '10':
             new_score = '0'
 
         self.anime_item.setProperty('score', str(new_score))
+        self.score = new_score
 
-    def onClick(self, controlId):
+    def onClick(self, control_id):
 
         self.handle_action(7)
 
@@ -167,6 +180,10 @@ class SourceSelect(BaseWindow):
         if action == 7:
             if focus_id == 2001:
                 self.edit_anime()
+            if focus_id == 1002:
+                xbmcgui.Dialog().textviewer('dsds', 'dsds')
+            if focus_id == 1003:
+                self.close()
 ##            if focus_id == 3001:
 ##                self.flip_mutliple_providers('enabled', provider_type='hosters')
 ##            if focus_id == 3002:

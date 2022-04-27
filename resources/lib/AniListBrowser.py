@@ -12,10 +12,14 @@ import json
 import time
 import datetime
 import ast
+import xbmc
 from functools import partial
 from .ui.globals import g
 from .ui import database
 from .ui.divide_flavors import div_flavor
+from resources.lib.database.cache import use_cache
+from resources.lib.database.anilist_sync import shows
+from resources.lib.modules.list_builder import ListBuilder
 
 class AniListBrowser(object):
     _URL = "https://graphql.anilist.co"
@@ -25,6 +29,9 @@ class AniListBrowser(object):
             self._TITLE_LANG = self._title_lang(title_key)
         else:
             self._TITLE_LANG = "userPreferred"
+        self.shows_database = shows.AnilistSyncDatabase()
+        self.anime_list_key = ('data', 'Page', 'media')
+        self.list_builder = ListBuilder()
 
     def _title_lang(self, title_key):
         title_lang = {
@@ -46,24 +53,28 @@ class AniListBrowser(object):
 
     def get_popular(self, page=1, format_in=''):
         #TASK: update season, year
-        season, year = ["SPRING", 2021]
+        season, year = ["FALL", 2021]
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'type': "ANIME",
             'season': season,
-            'year': str(year) + '%',
-            'sort': "POPULARITY_DESC"
+            'seasonYear': year
             }
 
         if format_in:
             variables['format'] = [format_in.upper()]
 
-        popular = database.get(self.get_base_res, 0.125, variables, page)
-        return self._process_anilist_view(popular, "anilist_popular/%d", page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime/list", variables=variables, dict_key=self.anime_list_key, page=page
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+        # popular = database.get(self.get_base_res, 0.125, variables, page)
+        # return self._process_anilist_view(popular, "anilist_popular/%d", page)
 
     def get_trending(self, page=1, format_in=''):
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'type': "ANIME",
             'sort': ["TRENDING_DESC"]
             }
@@ -71,29 +82,38 @@ class AniListBrowser(object):
         if format_in:
             variables['format'] = [format_in.upper()]
 
-        trending = database.get(self.get_base_res, 0.125, variables, page)
-        return self._process_anilist_view(trending, "anilist_trending/%d", page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime/list", variables=variables, dict_key=self.anime_list_key, page=page
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+        # trending = database.get(self.get_base_res, 0.125, variables, page)
+        # return self._process_anilist_view(trending, "anilist_trending/%d", page)
 
     def get_upcoming(self, page=1, format_in=''):
         #TASK: update season, year
-        season, year = ["SUMMER", 2021]
+        season, year = ["WINTER", 2022]
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'type': "ANIME",
             'season': season,
-            'year': str(year) + '%',
-            'sort': "POPULARITY_DESC"
+            'seasonYear': year
             }
 
         if format_in:
             variables['format'] = [format_in.upper()]
 
-        upcoming = database.get(self.get_base_res, 0.125, variables, page)
-        return self._process_anilist_view(upcoming, "anilist_upcoming/%d", page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime/list", variables=variables, dict_key=self.anime_list_key, page=page
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+        # upcoming = database.get(self.get_base_res, 0.125, variables, page)
+        # return self._process_anilist_view(upcoming, "anilist_upcoming/%d", page)
 
     def get_all_time_popular(self, page=1, format_in=''):
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'type': "ANIME",
             'sort': "POPULARITY_DESC"
             }
@@ -101,12 +121,19 @@ class AniListBrowser(object):
         if format_in:
             variables['format'] = [format_in.upper()]
 
-        all_time_popular = database.get(self.get_base_res, 0.125, variables, page)
-        return self._process_anilist_view(all_time_popular, "anilist_all_time_popular/%d", page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime/list", variables=variables, dict_key=self.anime_list_key, page=page
+            )
 
+        self.list_builder.show_list_builder(anilist_list)
+        # all_time_popular = database.get(self.get_base_res, 0.125, variables, page)
+        # return self._process_anilist_view(all_time_popular, "anilist_all_time_popular/%d", page)
+
+    @use_cache()
     def get_airing(self, page=1, format_in=''):
-        airing = database.get(self._get_airing, 12, page, format_in)
-        return airing
+        # airing = database.get(self._get_airing, 12, page, format_in)
+        # return airing
+        return self._get_airing(page, format_in)
 
     def _get_airing(self, page=1, format_in=''):
         today = datetime.date.today()
@@ -141,14 +168,19 @@ class AniListBrowser(object):
 
     def get_search(self, query, page=1):
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'search': query,
             'sort': "SEARCH_MATCH",
             'type': "ANIME"
             }
 
-        search = database.get(self.get_search_res, 0.125, variables, page)
-        return self._process_anilist_view(search, "search/%s/%%d" % query, page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime", variables=variables, dict_key=self.anime_list_key, page=page
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+        # search = database.get(self.get_search_res, 0.125, variables, page)
+        # return self._process_anilist_view(search, "search/%s/%%d" % query, page)
 
     def get_recommendation(self, anilist_id, page=1):
         variables = {
@@ -290,6 +322,59 @@ class AniListBrowser(object):
 
         json_res = results['data']['Page']
         return json_res
+
+    def anime_list_query(self):
+        query = '''
+        query (
+            $page: Int = 1,
+            $type: MediaType,
+            $isAdult: Boolean = false,
+            $format:[MediaFormat],
+            $season: MediaSeason,
+            $year: String,
+            $sort: [MediaSort] = [POPULARITY_DESC, SCORE_DESC]
+        ) {
+            Page (page: $page, perPage: 20) {
+                pageInfo {
+                    hasNextPage
+                    lastPage
+                }
+                ANIME: media (
+                    format_in: $format,
+                    type: $type,
+                    season: $season,
+                    startDate_like: $year,
+                    sort: $sort,
+                    isAdult: $isAdult
+                ) {
+                    id
+                    idMal
+                    title {
+                        userPreferred,
+                        romaji,
+                        english
+                    }
+                    coverImage {
+                        extraLarge
+                    }
+                    startDate {
+                        year,
+                        month,
+                        day
+                    }
+                    description
+                    synonyms
+                    format
+                    episodes
+                    status
+                    genres
+                    duration
+                }
+            }
+        }
+        '''
+
+        return query
 
     def get_search_res(self, variables, page=1):
         query = '''
@@ -649,7 +734,7 @@ class AniListBrowser(object):
         titles = list(set(res['title'].values()))
         if res['format'] == 'MOVIE':
             titles = list(res['title'].values())
-        titles = list(map(lambda x: x.encode('ascii','ignore').decode("utf-8")  if x else [], titles))[:3]
+        titles = list(map(lambda x: x.encode('ascii','ignore').decode("utf-8") if x else [], titles))[:3]
         query_titles = '({})'.format(')|('.join(map(str, titles)))
         return query_titles
 
@@ -701,7 +786,7 @@ class AniListBrowser(object):
 
         return parsed_view
 
-    def get_genres(self, genre_dialog):
+    def get_genres(self):
         query = '''
         query {
             genres: GenreCollection,
@@ -724,23 +809,65 @@ class AniListBrowser(object):
             tags_list.append(tag['name'])
 
         genre_display_list = genres_list + tags_list
-        return self._select_genres(genre_dialog, genre_display_list)
 
-    def _select_genres(self, genre_dialog, genre_display_list):
-        multiselect = genre_dialog(genre_display_list)
+        g.add_directory_item(
+            'Multi Select...', 
+            action="anilist_genres_page",
+            action_args= {
+                'genres_tags': genre_display_list,
+                },
+            mediatype="tvshow",
+            is_folder=False,
+            )
+        genres = genre_display_list
 
-        if not multiselect:
-            return []
+        if genres is None:
+            g.cancel_directory()
+            return
 
+        for i in genres:
+            if i in genres_list:
+                action_args = {'genres': [i]}
+            else:
+                action_args = {'tags': [i]}
+
+            g.add_directory_item(
+                i, action="anilist_genres_page", action_args=action_args
+                )
+        g.close_directory(g.CONTENT_GENRES)
+
+        # return self._select_genres(genre_dialog, genre_display_list)
+
+    def select_genres(self, genre_dialog, genre_display_list):
         genre_list = []
         tag_list = []
 
-        for selection in multiselect:
-            if selection <= 17:
-                genre_list.append(genre_display_list[selection])
-                continue
+        if 'genres_tags' in genre_display_list:
+            genres_tags = genre_display_list.get('genres_tags')
+            multiselect = genre_dialog(genres_tags)
 
-            tag_list.append(genre_display_list[selection])
+            if not multiselect:
+                return
+
+            for selection in multiselect:
+                if selection <= 17:
+                    genre_list.append(genres_tags[selection])
+                    continue
+
+                tag_list.append(genres_tags[selection])
+
+            g.REQUEST_PARAMS.pop('action_args')
+            g.REQUEST_PARAMS['action_args'] = {
+                'genres': genre_list,
+                'tags': tag_list
+            }
+
+            g.container_update(replace=True)
+        else:
+            if 'genres' in genre_display_list:
+                genre_list = genre_display_list['genres']
+            else:
+                tag_list = genre_display_list['tags']
 
         return self._genres_payload(genre_list, tag_list)
 
@@ -794,17 +921,22 @@ class AniListBrowser(object):
         '''
 
         variables = {
-            'page': page,
+            'page': g.PAGE,
             'type': "ANIME"
             }
 
         if genre_list:
-            variables["includedGenres"] = genre_list
+            variables["genres"] = genre_list
 
         if tag_list:
-            variables["includedTags"] = tag_list
+            variables["tags"] = tag_list
 
-        return self._process_genre_view(query, variables, "anilist_genres/%s/%s/%%d" %(genre_list, tag_list), page)
+        anilist_list = self.shows_database.extract_trakt_page(
+            self._URL, query_path="search/anime/genre", variables=variables, dict_key=self.anime_list_key, page=page
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+        # return self._process_genre_view(query, variables, "anilist_genres/%s/%s/%%d" %(genre_list, tag_list), page)
 
     @div_flavor
     def _process_genre_view(self, query, variables, base_plugin_url, page, dub=False):

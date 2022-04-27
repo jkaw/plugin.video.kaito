@@ -55,8 +55,7 @@ class WatchlistFlavorAuth(BaseWindow):
     def set_settings(self):
         res = {}
         if self.flavor == 'anilist':
-            res['username'] = self.getControl(1000).getText()
-            res['token'] = self.getControl(1001).getText()
+            res['token'] = self.getControl(1000).getText()
         else:
             res['authvar'] = self.getControl(1000).getText()
 
@@ -80,7 +79,6 @@ class AltWatchlistFlavorAuth(object):
                                                   g.lang(40106).replace('below', 'in the input dialog that will popup once you close this'),
                                                   g.lang(40110)))
 
-            res['username'] = dialog.input('Enter AniList username', type=xbmcgui.INPUT_ALPHANUM)
             res['token'] = dialog.input('Enter AniList token', type=xbmcgui.INPUT_ALPHANUM)
         else:
             dialog.textviewer(g.ADDON_NAME + ': MyAnimeList',

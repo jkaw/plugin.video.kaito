@@ -7,6 +7,7 @@ import re
 import itertools
 from functools import partial
 from ..ui import source_utils
+from resources.lib.database.cache import use_cache
 from resources.lib.ui.globals import g
 from ..ui.BrowserBase import BrowserBase
 from ..debrid import real_debrid, all_debrid
@@ -17,7 +18,7 @@ import copy
 
 class sources(BrowserBase):
     def get_sources(self, anilist_id, episode, get_backup):
-        slugs = database.get(get_backup, 168, anilist_id, 'Gogoanime')
+        slugs = get_backup(anilist_id, 'Gogoanime')
         if not slugs:
             return []
         slugs = list(slugs.keys())
@@ -27,7 +28,7 @@ class sources(BrowserBase):
         return all_results
 
     def _process_gogo(self, slug, show_id, episode):
-        url = "https://gogoanime.so/%s-episode-%s" % (slug, episode)
+        url = "https://gogoanime.vc/%s-episode-%s" % (slug, episode)
         title = (slug.replace('-', ' ')).title()
         result = requests.get(url).text
         soup = bs.BeautifulSoup(result, 'html.parser')
@@ -36,7 +37,11 @@ class sources(BrowserBase):
         for element in soup.select('.anime_muti_link > ul > li'):
             server = element.get('class')[0]
             link = element.a.get('data-video')
-            type_ = 'hoster'
+            type_ = None
+            # type_ = 'hoster'
+
+            # if server == 'streamtape':
+            #     type_ = 'embed'
 
             if server == 'xstreamcdn':
                 type_ = 'embed'
@@ -45,7 +50,7 @@ class sources(BrowserBase):
                 type_ = 'embed'
                 link = 'https:' + link
 
-            elif server:
+            if not type_:
                 continue
 
             source = {
@@ -71,20 +76,44 @@ class sources(BrowserBase):
         url = 'https://ajax.gogocdn.net/ajax/page-recent-release.html?page=1&type=2'
         return self._process_latest_view(url)
 
-    def _process_latest_view(self, url):
+    @use_cache(0.125)
+    def __get_request(self, url):
         result = requests.get(url).text
+        return result
+
+    def _process_latest_view(self, url):
+        result = self.__get_request(url)
         soup = bs.BeautifulSoup(result, 'html.parser')
         animes = soup.find_all('div', {'class': 'img'})
         all_results = list(map(self._parse_latest_view, animes))
-        return all_results
+        g.close_directory(g.CONTENT_EPISODE)
+        # return all_results
 
     def _parse_latest_view(self, res):
         res = res.a
         info = {}
-        slug, episode = (res['href'][1:]).rsplit('-episode-')
-        url = '%s/%s' %(slug, episode)
+        slug, episode = (res['href'][1:]).rsplit('-episode-', 1)
         name = '%s - Ep. %s' % (res['title'], episode)
         image = res.img['src']
         info['title'] = name
-        info['mediatype'] = 'tvshow'
-        return g.allocate_item(name, "play_gogo/" + str(url), False, image, info, is_playable=True)
+        info['mediatype'] = 'episode'
+
+        art = {
+            'poster': image,
+            'fanart': image,
+            'thumb': image,
+        }
+
+        menu_item = {
+            'art': art,
+            'info': info
+        }
+
+        g.add_directory_item(
+            name,
+            action='play_gogo',
+            action_args={"slug": slug, "_episode": episode, "mediatype": "episode"},
+            menu_item=menu_item,
+            is_playable=True
+        )
+        # return g.allocate_item(name, "play_gogo/" + str(url), False, image, info, is_playable=True)

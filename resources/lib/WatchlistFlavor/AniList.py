@@ -6,6 +6,7 @@ import itertools
 import json
 import ast
 from ..ui import database
+from resources.lib.ui.globals import g
 from .WatchlistFlavorBase import WatchlistFlavorBase
 
 class AniListWLF(WatchlistFlavorBase):
@@ -17,27 +18,26 @@ class AniListWLF(WatchlistFlavorBase):
     #Not login, but retrieveing userId for watchlist
     def login(self):
         query = '''
-        query ($name: String) {
-            User(name: $name) {
+        query {
+            Viewer {
+                name
                 id
-                }
             }
+        }
         '''
 
-        variables = {
-            "name": self._username
-            }
-
-        result = self._post_request(self._URL, json={'query': query, 'variables': variables})
+        result = self._post_request(self._URL, headers=self.__headers(), json={'query': query, 'variables': []})
         results = result.json()
 
         if "errors" in results:
             return
 
-        userId = results['data']['User']['id']
+        userId = results['data']['Viewer']['id']
+        username = results['data']['Viewer']['name']
 
         login_data = {
-            'userid': str(userId)
+            'userid': str(userId),
+            'username': username
             }
 
         return login_data
@@ -56,13 +56,19 @@ class AniListWLF(WatchlistFlavorBase):
         return self._parse_view(base)
 
     def _process_watchlist_view(self, base_plugin_url, page):
-        all_results = list(map(self._base_watchlist_view, self.__anilist_statuses()))
-        all_results = list(itertools.chain(*all_results))
-        return all_results
+        for name, status in self.__anilist_statuses():
+            g.add_directory_item(
+                name,
+                action='watchlist_status_type',
+                action_args={"flavor": "anilist", "status": status}
+            )
+        g.close_directory(g.CONTENT_FOLDER)
+        # all_results = list(map(self._base_watchlist_view, self.__anilist_statuses()))
+        # all_results = list(itertools.chain(*all_results))
+        # return all_results
 
     def __anilist_statuses(self):
         statuses = [
-            ("Next Up", "CURRENT?next_up=true"),
             ("Current", "CURRENT"),
             ("Rewatching", "REPEATING"),
             ("Plan to Watch", "PLANNING"),
@@ -73,50 +79,52 @@ class AniListWLF(WatchlistFlavorBase):
 
         return statuses
 
-    def get_watchlist_status(self, status, next_up):
-        query = '''
-        query ($userId: Int, $userName: String, $status: MediaListStatus, $type: MediaType, $sort: [MediaListSort]) {
-            MediaListCollection(userId: $userId, userName: $userName, status: $status, type: $type, sort: $sort) {
-                lists {
-                    entries {
-                        ...mediaListEntry
-                        }
-                    }
-                }
-            }
+    def get_watchlist_status(self, status):
+        # query = '''
+        # query ($userId: Int, $userName: String, $status: MediaListStatus, $type: MediaType, $sort: [MediaListSort]) {
+        #     MediaListCollection(userId: $userId, userName: $userName, status: $status, type: $type, sort: $sort) {
+        #         lists {
+        #             entries {
+        #                 ...mediaListEntry
+        #                 }
+        #             }
+        #         }
+        #     }
 
-        fragment mediaListEntry on MediaList {
-            id
-            mediaId
-            status
-            progress
-            customLists
-            media {
-                id
-                idMal
-                title {
-                    userPreferred,
-                    romaji,
-                    english
-                }
-                coverImage {
-                    extraLarge
-                }
-                startDate {
-                    year,
-                    month,
-                    day
-                }
-                description
-                synonyms
-                format                
-                status
-                episodes
-                genres
-                duration
-            }
-        }
-        '''
+        # fragment mediaListEntry on MediaList {
+        #     id
+        #     mediaId
+        #     status
+        #     progress
+        #     customLists
+        #     media {
+        #         id
+        #         idMal
+        #         title {
+        #             userPreferred,
+        #             romaji,
+        #             english
+        #         }
+        #         coverImage {
+        #             extraLarge
+        #         }
+        #         startDate {
+        #             year,
+        #             month,
+        #             day
+        #         }
+        #         description
+        #         synonyms
+        #         format                
+        #         status
+        #         episodes
+        #         genres
+        #         duration
+        #     }
+        # }
+        # '''
+
+        anime_list_key = ('data', 'MediaListCollection', 'lists', 0, 'entries')
 
         variables = {
             'userId': int(self._user_id),
@@ -126,7 +134,13 @@ class AniListWLF(WatchlistFlavorBase):
             'sort': [self.__get_sort()]
             }
 
-        return self._process_status_view(query, variables, next_up, "watchlist/%d", page=1)
+        anilist_list = self.shows_database.extract_animelist_page(
+            self._URL, query_path='animelist/status', variables=variables, dict_key=anime_list_key
+            )
+
+        self.list_builder.show_list_builder(anilist_list)
+
+        # return self._process_status_view(query, variables, next_up, "watchlist/%d", page=1)
 
     def get_watchlist_anime_entry(self, anilist_id):
         query = '''
@@ -187,15 +201,15 @@ class AniListWLF(WatchlistFlavorBase):
         res = res['media']
 
         #remove cached eps for releasing shows every five days so new eps metadata can be shown
-        if res.get('status') == 'RELEASING':
-            try:
-                from datetime import datetime, timedelta
-                check_update = (datetime.today() - timedelta(days=5)).strftime('%Y-%m-%d')
-                last_updated = database.get_episode_list(116006)[0]['last_updated']
-                if check_update == last_updated:
-                    database.remove_episodes(res['id'])
-            except:
-                pass
+        # if res.get('status') == 'RELEASING':
+        #     try:
+        #         from datetime import datetime, timedelta
+        #         check_update = (datetime.today() - timedelta(days=5)).strftime('%Y-%m-%d')
+        #         last_updated = database.get_episode_list(116006)[0]['last_updated']
+        #         if check_update == last_updated:
+        #             database.remove_episodes(res['id'])
+        #     except:
+        #         pass
 
 ##        kodi_meta = self._get_kodi_meta(res['id'], 'anilist')
 

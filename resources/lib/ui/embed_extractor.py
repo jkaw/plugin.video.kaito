@@ -132,12 +132,10 @@ def __extract_mp4upload(url, page_content, referer=None):
 
 def __extract_streamtape(url, data):
     res = requests.get(url).text
-    soup = BeautifulSoup(res, 'html.parser')
-    videolink = soup.select('div#videolink')
-    if not videolink:
-        return
-    videolink = videolink[0].text
-    stream_link = 'https:' + videolink if videolink.startswith('//') else videolinkvideolink[0].text
+    groups = re.search(
+        r"document\.getElementById\(.*?\)\.innerHTML = [\"'](.*?)[\"'] \+ [\"'](.*?)[\"']",
+        res)
+    stream_link = "https:" + groups.group(1) + groups.group(2)
     return stream_link
 
 def __extract_vidstream(url, data):
@@ -220,25 +218,35 @@ __register_extractor(["http://mp4upload.com/",
 
 __register_extractor(["https://vidstreaming.io",
                       "https://gogo-stream.com",
-                      "https://gogo-play.net"],
+                      "https://gogo-play.net",
+                      "https://streamani.net",
+                      "https://goload.one"],
                      __extract_vidstream,
                      None,
                      [{'d': 'https://vidstreaming.io'},
                       {'d': 'https://gogo-stream.com'},
-                      {'d': 'https://gogo-play.net'}])
+                      {'d': 'https://gogo-play.net'},
+                      {'d': 'https://streamani.net'},
+                      {'d': 'https://goload.one'}])
 
 __register_extractor(["https://www.xstreamcdn.com/v/",
                       "https://gcloud.live/v/",
                       "https://www.fembed.com/v/",
                       "https://www.novelplanet.me/v/",
-                      "https://fcdn.stream/v/"],
+                      "https://fcdn.stream/v/",
+                      "https://embedsito.com",
+                      "https://fplayer.info",
+                      "https://fembed-hd.com"],
                      __extract_xstreamcdn,
                      lambda x: x.replace('/v/', '/api/source/'),
                      [{'d': 'www.xstreamcdn.com'},
                       {'d': 'gcloud.live'},
                       {'d': 'www.fembed.com'},
                       {'d': 'www.novelplanet.me'},
-                      {'d': 'fcdn.stream'}])
+                      {'d': 'fcdn.stream'},
+                      {'d': 'embedsito.com'},
+                      {'d': 'fplayer.info'},
+                      {'d': 'fembed-hd.com'}])
 
 __register_extractor(["https://streamtape.com/e/"],
                      __extract_streamtape,

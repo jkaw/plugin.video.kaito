@@ -33,30 +33,54 @@ def get_auth_dialog(flavor):
     else:
         return
 
-@route('watchlist_login/*')
+@route('watchlist_login_anilist')
+def WL_LOGIN_ANILIST(payload, params):
+    return get_auth_dialog("anilist")
+
+@route('watchlist_login_mal')
+def WL_LOGIN_MAL(payload, params):
+    return get_auth_dialog("mal")
+
+@route('watchlist_login_kitsu')
+def WL_LOGIN_KITSU(payload, params):
+    return WatchlistFlavor.login_request("kitsu")
+
+@route('watchlist_login')
 def WL_LOGIN(payload, params):
-    if params:
-        return get_auth_dialog(payload)
+    import xbmcgui
+    xbmcgui.Dialog().textviewer('dsds', str(params))
+
+    # if params:
+    #     return get_auth_dialog(payload)
         
-    return WatchlistFlavor.login_request(payload)
+    # return WatchlistFlavor.login_request(payload)
 
-@route('watchlist_logout/*')
+@route('watchlist_logout')
 def WL_LOGOUT(payload, params):
-    return WatchlistFlavor.logout_request(payload)
+    action_args = params.get('action_args')
+    flavor = action_args["flavor"]
+    return WatchlistFlavor.logout_request(flavor)
 
-@route('watchlist/*')
+@route('watchlist')
 def WATCHLIST(payload, params):
-    return g.draw_items(WatchlistFlavor.watchlist_request(payload), contentType=g.get_setting("contenttype.menu"))
+    flavor = params.get("action_args")["flavor"]
+    WatchlistFlavor.watchlist_request(flavor)
 
-@route('watchlist_status_type/*')
+@route('watchlist_status_type')
 def WATCHLIST_STATUS_TYPE(payload, params):
-    flavor, status = payload.rsplit("/")
-    return g.draw_items(WatchlistFlavor.watchlist_status_request(flavor, status, params))
+    action_args = params.get('action_args')
+    flavor = action_args["flavor"]
+    status = action_args["status"]
+    WatchlistFlavor.watchlist_status_request(flavor, status)
 
-@route('watchlist_status_type_pages/*')
+@route('watchlist_status_type_pages')
 def WATCHLIST_STATUS_TYPE_PAGES(payload, params):
-    flavor, status, offset, page = payload.rsplit("/")
-    return g.draw_items(WatchlistFlavor.watchlist_status_request_pages(flavor, status, params, offset, int(page)))
+    action_args = params.get('action_args')
+    flavor = action_args["flavor"]
+    status = action_args["status"]
+    offset = action_args["offset"]
+    page = action_args["page"]
+    WatchlistFlavor.watchlist_status_request_pages(flavor, status, offset, int(page))
 
 @route('watchlist_query/*')
 def WATCHLIST_QUERY(payload, params):
@@ -140,8 +164,9 @@ def add_watchlist(items):
         return
 
     for flavor in flavors:
-        items.insert(0, (
-            "%s's %s" % (flavor.username, flavor.title),
-            "watchlist/%s" % flavor.flavor_name,
-            flavor.image,
-        ))
+        items.insert(0, {
+            "name": "%s's %s" % (flavor.username, flavor.title),
+            "action": "watchlist",
+            "args": {"flavor": flavor.flavor_name},
+            "menu_item": {"art": {"poster": flavor.image}},
+        })

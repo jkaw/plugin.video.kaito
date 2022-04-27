@@ -509,6 +509,22 @@ msgctxt "#40372"
 msgid "Inspect Cloud Files on Scrape"
 msgstr ""
 
+msgctxt "#40373"
+msgid "Language Invoker Options"
+msgstr ""
+
 msgctxt "#40374"
-msgid "Enable Source Scraping"
+msgid "Re-Use Language Invoker Status"
+msgstr ""
+
+msgctxt "#40375"
+msgid "Toggle Re-Use Language Invoker"
+msgstr ""
+
+msgctxt "#40376"
+msgid "Auto close dialog"
+msgstr ""
+
+msgctxt "#40377"
+msgid "Seconds before closing"
 msgstr ""

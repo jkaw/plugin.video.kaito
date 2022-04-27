@@ -58,6 +58,7 @@ class route(object):
         return self._func
 
 def router_process(url, params={}):
+    url = params.get('action', '')
     payload = "/".join(url.split("/")[1:])
 
     for param in _REGISTERED_PARAM_HOOKS:

@@ -10,6 +10,10 @@ import xbmcgui
 from . import http
 
 from resources.lib.ui.globals import g
+from resources.lib.ui import control
+from resources.lib.modules import smartPlay
+from resources.lib.database.anilist_sync import shows
+
 
 kodiGui = xbmcgui
 execute = xbmc.executebuiltin
@@ -50,27 +54,50 @@ class watchlistPlayer(xbmc.Player):
         self.current_time = 0
         self.updated = False
         self.media_type = None
+        self.season = None
+        self.shows_sync = shows.AnilistSyncDatabase()
 ##        self.AVStarted = False
 
-    def handle_player(self, anilist_id, watchlist_update, build_playlist, episode, filter_lang):
-        self._anilist_id = anilist_id
+    def handle_player(self, args, watchlist_update):
+        # self.anilist_id = args['anilist_id']
 
         if watchlist_update:
-            self._watchlist_update = watchlist_update(anilist_id, episode)
+            self._watchlist_update = watchlist_update(args['anilist_id'], args['episode'])
 
-        self._build_playlist = build_playlist
-        self._episode = episode
-        self._filter_lang = filter_lang
+        # self._build_playlist = build_playlist
+        # self._episode = episode
+        # self._filter_lang = filter_lang
+        # self._indexer = indexer
+        self.media_type = args['mediatype']
+        self.args = args
         self.keepAlive()
         
     def onPlayBackStarted(self):
-        if self._build_playlist and g.PLAYLIST.size() == 1:
-            self._build_playlist(self._anilist_id, self._episode, self._filter_lang)
+        # import xbmcgui
+        # xbmcgui.Dialog().textviewer('dsdsd', str(self.args))
+        if self.media_type != 'movie' and g.get_setting('smartplay.skipintrodialog') == 'true':
+            while self.isPlaying():
+                time_ = int(self.getTime())
+                if time_ > 240:
+                    break
+                elif time_ >= 1:
+                    PlayerDialogs()._show_skip_intro()
+                    break
+                else:
+                    xbmc.sleep(250)
 
-        current_ = g.PLAYLIST.getposition()
-        self.media_type = g.PLAYLIST[current_].getVideoInfoTag().getMediaType()
-        g.set_setting('addon.last_watched', self._anilist_id)
-        pass
+        if g.PLAYLIST.size() == 1:
+            smartPlay.SmartPlay(self.args).build_playlist()
+        # if self._build_playlist and g.PLAYLIST.size() == 1:
+        #     self._build_playlist(self._anilist_id, self._episode, self._filter_lang, indexer=self._indexer)
+
+        try:
+            current_ = g.PLAYLIST.getposition()
+            self.season = g.PLAYLIST[current_].getVideoInfoTag().getSeason()
+        except:
+            pass
+        # g.set_setting('addon.last_watched', self._anilist_id)
+        # pass
 
 ##    def onAVStarted(self):
 ##        self.AVStarted = True
@@ -102,9 +129,45 @@ class watchlistPlayer(xbmc.Player):
 
         return watched_percent
 
+    def _mark_playing_item_watched(self):
+        while self.isPlaying() and not self.updated:
+            try:
+                watched_percentage = self.getWatchedPercent()
+
+                try:
+                    self.current_time = self.getTime()
+
+                except:
+                    import traceback
+                    traceback.print_exc()
+                    pass
+
+                if watched_percentage > 80:
+                    if self.season and self.media_type != 'movie':
+                        self.shows_sync.mark_episode_watched(
+                            self.args['anilist_id'],
+                            self.season,
+                            self.args['episode']
+                        )
+
+                    self.updated = True
+                    break
+
+            except:
+                import traceback
+                traceback.print_exc()
+                xbmc.sleep(1000)
+                continue
+
+            xbmc.sleep(1000)
+
+        else:
+            return
+
+
     def onWatchedPercent(self):
         if not self._watchlist_update:
-            return
+            return self._mark_playing_item_watched()
 
         while self.isPlaying() and not self.updated:
             try:
@@ -120,6 +183,14 @@ class watchlistPlayer(xbmc.Player):
 
                 if watched_percentage > 80:
                     self._watchlist_update()
+
+                    if self.season and self.media_type != 'movie':
+                        self.shows_sync.mark_episode_watched(
+                            self.args['anilist_id'],
+                            self.season,
+                            self.args['episode']
+                        )
+
                     self.updated = True
                     break
 
@@ -144,7 +215,7 @@ class watchlistPlayer(xbmc.Player):
 ##            if self.AVStarted:
 ##                break
 
-        g.close_all_dialogs()
+        # g.close_all_dialogs()
 
         try:
             audio_lang = self.getAvailableAudioStreams()
@@ -163,19 +234,8 @@ class watchlistPlayer(xbmc.Player):
         except:
             pass
 
-        if self.media_type == 'movie':
-            return self.onWatchedPercent()
-
-        if g.get_setting('smartplay.skipintrodialog') == 'true':
-            while self.isPlaying():
-                time_ = int(self.getTime())
-                if time_ > 240:
-                    break
-                elif time_ >= 1:
-                    PlayerDialogs()._show_skip_intro()
-                    break
-                else:
-                    xbmc.sleep(250)
+        # if self.media_type == 'movie':
+        #     return self.onWatchedPercent()
 
         scrobble = self.onWatchedPercent()
 
@@ -187,7 +247,7 @@ class watchlistPlayer(xbmc.Player):
         if endpoint:
             while self.isPlaying():
                 if int(self.getTotalTime()) - int(self.getTime()) <= endpoint:
-                    xbmc.executebuiltin('RunPlugin("plugin://plugin.video.kaito/run_player_dialogs")')
+                    xbmc.executebuiltin('RunPlugin("plugin://plugin.video.kaito?action=run_player_dialogs")')
                     break
                 else:
                     xbmc.sleep(1000)
@@ -239,11 +299,17 @@ class PlayerDialogs(xbmc.Player):
     @staticmethod
     def _get_next_item_args():
         current_position = g.PLAYLIST.getposition()
-        _next_info = g.PLAYLIST[current_position + 1]
-        next_info = {}
-        next_info['thumb'] = _next_info.getArt('thumb')
-        next_info['name'] = _next_info.getLabel()
+        next_item = g.PLAYLIST[  # pylint: disable=unsubscriptable-object
+            current_position + 1
+        ]
+        
+        next_info = {
+            "art": {}
+        }
+        next_info['art']['thumb'] = next_item.getArt('thumb')
+        next_info['name'] = next_item.getLabel()
         next_info['playnext'] = True
+
         return next_info
 
     @staticmethod
@@ -273,7 +339,7 @@ def _prefetch_play_link(link):
         "headers": linkInfo.headers,
     }
 
-def play_source(link, anilist_id=None, watchlist_update=None, build_playlist=None, episode=None, filter_lang=None, rescrape=False):
+def play_source(link, action_args, watchlist_update):
     linkInfo = _prefetch_play_link(link)
     if not linkInfo:
         cancelPlayback()
@@ -281,10 +347,10 @@ def play_source(link, anilist_id=None, watchlist_update=None, build_playlist=Non
 
     item = xbmcgui.ListItem(path=linkInfo['url'])
 
-    if rescrape:
-        episode_info = build_playlist(anilist_id, '', filter_lang, rescrape=True)[episode - 1]
-        item.setInfo('video', infoLabels=episode_info['info'])
-        item.setArt(episode_info['image'])
+    # if rescrape:
+    #     episode_info = build_playlist(anilist_id, '', filter_lang, rescrape=True)[episode - 1]
+    #     item.setInfo('video', infoLabels=episode_info['info'])
+    #     item.setArt(episode_info['image'])
 
     if 'Content-Type' in linkInfo['headers']:
         item.setProperty('mimetype', linkInfo['headers']['Content-Type'])
@@ -292,7 +358,7 @@ def play_source(link, anilist_id=None, watchlist_update=None, build_playlist=Non
     # Run any mimetype hook
     item = hook_mimetype.trigger(linkInfo['headers']['Content-Type'], item)
     xbmcplugin.setResolvedUrl(g.PLUGIN_HANDLE, True, item)
-    watchlistPlayer().handle_player(anilist_id, watchlist_update, build_playlist, episode, filter_lang)
+    watchlistPlayer().handle_player(action_args, watchlist_update)
 
 @hook_mimetype('application/dash+xml')
 def _DASH_HOOK(item):

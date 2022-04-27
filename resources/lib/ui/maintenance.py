@@ -39,6 +39,14 @@ def refresh_apis():
     except:
         pass
 
+def try_update_mixed_episodes():
+    """
+    Updates episodes for next up menu item
+    """
+    from resources.lib.database.anilist_sync import shows
+    episodes = shows.AnilistSyncDatabase().get_nextup_episodes()
+    shows.AnilistSyncDatabase()._try_update_mixed_episodes(episodes)
+
 def wipe_install():
     """
     Destroys kaito's user_data folder for current user resetting addon to default
@@ -96,5 +104,6 @@ def run_maintenance():
     # Refresh API tokens
     try:
         refresh_apis()
+        # try_update_mixed_episodes()
     except:
         pass

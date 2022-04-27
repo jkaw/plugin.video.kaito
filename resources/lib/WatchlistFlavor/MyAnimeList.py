@@ -62,14 +62,20 @@ class MyAnimeListWLF(WatchlistFlavorBase):
         g.set_setting('mal.refresh', res['refresh_token'])
         g.set_setting('mal.expiry', str(time.time() + int(res['expires_in'])))
 
-    def _handle_paging(self, hasNextPage, base_url, page):
+    def _handle_paging(self, hasNextPage, status, page):
         if not hasNextPage:
             return []
 
         next_page = page + 1
         name = "Next Page (%d)" %(next_page)
         offset = (re.compile("offset=(.+?)&").findall(hasNextPage))[0]
-        return self._parse_view({'name':name, 'url': base_url % (offset, next_page), 'image': None, 'plot': None})
+
+        g.add_directory_item(
+            name,
+            action='watchlist_status_type_pages',
+            action_args={"flavor": "mal", "status": status, "offset": offset, "page": next_page},
+        )
+        # return self._parse_view({'name':name, 'url': base_url % (offset, next_page), 'image': None, 'plot': None})
 
     def watchlist(self):
         return self._process_watchlist_view('', "watchlist_page/%d", page=1)
@@ -85,13 +91,16 @@ class MyAnimeListWLF(WatchlistFlavorBase):
         return self._parse_view(base)
 
     def _process_watchlist_view(self, params, base_plugin_url, page):
-        all_results = list(map(self._base_watchlist_view, self.__mal_statuses()))
-        all_results = list(itertools.chain(*all_results))
-        return all_results
+        for name, status in self.__mal_statuses():
+            g.add_directory_item(
+                name,
+                action='watchlist_status_type',
+                action_args={"flavor": "mal", "status": status}
+            )
+        g.close_directory(g.CONTENT_FOLDER)
 
     def __mal_statuses(self):
         statuses = [
-            ("Next Up", "watching?next_up=true"),
             ("Currently Watching", "watching"),
             ("Completed", "completed"),
             ("On Hold", "on_hold"),
@@ -102,7 +111,7 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
         return statuses
         
-    def get_watchlist_status(self, status, next_up, offset=0, page=1):
+    def get_watchlist_status(self, status, offset=0, page=1):
         params = {
             "status": status,
             "sort": self.__get_sort(),
@@ -112,7 +121,7 @@ class MyAnimeListWLF(WatchlistFlavorBase):
             }
 
         url = self._to_url("users/@me/animelist")
-        return self._process_status_view(url, params, next_up, "watchlist_status_type_pages/mal/%s/%%s/%%d" % status, page)
+        return self._process_status_view(url, params, status, page)
 
     def get_watchlist_anime_entry(self, anilist_id):
         mal_id = self._get_mapping_id(anilist_id, 'mal_id')
@@ -124,9 +133,9 @@ class MyAnimeListWLF(WatchlistFlavorBase):
             "fields": 'my_list_status',
             }
 
-        url = self._to_url("users/@me/animelist")
+        url = self._to_url("anime/{}".format(mal_id))
         results = self._get_request(url, headers=self.__headers(), params=params)
-        results = results.json()['data'][0]['node']['my_list_status']
+        results = results.json()['my_list_status']
 
         anime_entry = {}
         anime_entry['eps_watched'] = results['num_episodes_watched']
@@ -135,18 +144,18 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
         return anime_entry
 
-    def _process_status_view(self, url, params, next_up, base_plugin_url, page):
+    def _process_status_view(self, url, params, status, page):
         results = (self._get_request(url, headers=self.__headers(), params=params)).json()
 
-        if next_up:
-            all_results = list(map(self._base_next_up_view, results['data']))
-        else:
-            all_results = list(map(self._base_watchlist_status_view, results['data']))
+        all_results = list(map(self._base_watchlist_status_view, results['data']))
 
-        all_results = list(itertools.chain(*all_results))
+        page = self._handle_paging(results['paging'].get('next'), status, page)
 
-        all_results += self._handle_paging(results['paging'].get('next'), base_plugin_url, page)
-        return all_results
+        g.close_directory(g.CONTENT_SHOW)
+
+        # all_results = list(itertools.chain(*all_results))
+
+        # return all_results
 
     def _base_watchlist_status_view(self, res):
         info = {}
@@ -166,21 +175,48 @@ class MyAnimeListWLF(WatchlistFlavorBase):
         except:
             pass
 
-        info['mediatype'] = 'tvshow'
+        if res['node']['media_type'] == 'movie' and res['node']["num_episodes"] == 1:
+            info['mediatype'] = 'movie'
+            action = 'show_seasons'
+        else:
+            info['mediatype'] = 'tvshow'
+            action = 'mal_season_episodes'
 
-        base = {
-            "name": '%s - %s/%s' % (res['node']["title"], res['list_status']["num_episodes_watched"], res['node']["num_episodes"]),
-            "url": "watchlist_to_ep/%s//%s" % (res['node']['id'], res['list_status']["num_episodes_watched"]),
-            "image": res['node']['main_picture'].get('large', res['node']['main_picture']['medium']),
-            "plot": info,
+        image = res['node']['main_picture'].get('large', res['node']['main_picture']['medium'])
+
+        art = {
+            'poster': image,
+            'fanart': image,
+            'keyart': image,
         }
 
-        if res['node']['media_type'] == 'movie' and res['node']["num_episodes"] == 1:
-            base['url'] = "watchlist_to_movie/%s" % (res['node']['id'])
-            base['plot']['mediatype'] = 'movie'
-            return self._parse_view(base, False)
+        menu_item = {
+            'art': art,
+            'info': info
+        }
 
-        return self._parse_view(base)
+        name = '%s - %s/%s' % (res['node']["title"], res['list_status']["num_episodes_watched"], res['node']["num_episodes"])
+
+        g.add_directory_item(
+            name,
+            action=action,
+            action_args={"mal_id": res['node']['id']},
+            menu_item=menu_item
+        )
+
+        # base = {
+        #     "name": '%s - %s/%s' % (res['node']["title"], res['list_status']["num_episodes_watched"], res['node']["num_episodes"]),
+        #     "url": "watchlist_to_ep/%s//%s" % (res['node']['id'], res['list_status']["num_episodes_watched"]),
+        #     "image": res['node']['main_picture'].get('large', res['node']['main_picture']['medium']),
+        #     "plot": info,
+        # }
+
+        # if res['node']['media_type'] == 'movie' and res['node']["num_episodes"] == 1:
+        #     base['url'] = "watchlist_to_movie/%s" % (res['node']['id'])
+        #     base['plot']['mediatype'] = 'movie'
+        #     return self._parse_view(base, False)
+
+        # return self._parse_view(base)
 
     def _base_next_up_view(self, res):
         mal_id = res['node']['id']

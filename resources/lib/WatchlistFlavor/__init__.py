@@ -60,16 +60,20 @@ class WatchlistFlavor(object):
         return WatchlistFlavor.__instance_flavor(name).watchlist()
 
     @staticmethod
-    def watchlist_status_request(name, status, next_up):
-        return WatchlistFlavor.__instance_flavor(name).get_watchlist_status(status, next_up)
+    def watchlist_status_request(name, status):
+        return WatchlistFlavor.__instance_flavor(name).get_watchlist_status(status)
 
     @staticmethod
-    def watchlist_status_request_pages(name, status, next_up, offset, page):
-        return WatchlistFlavor.__instance_flavor(name).get_watchlist_status(status, next_up, offset, page)
+    def watchlist_status_request_pages(name, status, offset, page):
+        return WatchlistFlavor.__instance_flavor(name).get_watchlist_status(status, offset, page)
 
     @staticmethod
     def watchlist_anime_entry_request(name, anilist_id):
         return WatchlistFlavor.__instance_flavor(name).get_watchlist_anime_entry(anilist_id)
+
+    @staticmethod
+    def watchlist_anime_entry_edit_request(name, anilist_id, status, score, eps_watched):
+        return WatchlistFlavor.__instance_flavor(name).watchlist_anime_entry_edit(anilist_id, status, score, eps_watched)
 
     @staticmethod
     def watchlist_update_request(anilist_id, episode):
@@ -98,6 +102,7 @@ class WatchlistFlavor(object):
         g.set_setting('%s.password' % flavor, '')
         g.set_setting('%s.sort' % flavor, '')
         g.set_setting('%s.titles' % flavor, '')
+        g.set_setting('%s.enabled' % flavor, "false")
         return g.container_refresh()
 
     @staticmethod

@@ -2,6 +2,7 @@
 from resources.lib.ui import control
 from resources.lib.ui import player
 from resources.lib.ui import database
+from resources.lib.database.searchHistory import SearchHistory
 from resources.lib.ui.globals import g
 from resources.lib.ui.router import on_param, route, router_process
 from resources.lib.KaitoBrowser import KaitoBrowser
@@ -10,20 +11,23 @@ from resources.lib.WatchlistIntegration import set_browser, add_watchlist, watch
 import ast
 import sys
 
+from resources.lib.third_party import anitopy
+
 g.init_globals(sys.argv)
 
 MENU_ITEMS = [
-    (g.lang(30001), "anilist_airing", ''),
-    (g.lang(30002), "airing_dub", ''),
-    (g.lang(30003), "latest", ''),
-    (g.lang(30004), "latest_dub", ''),
-    (g.lang(30005), "anilist_trending", ''),
-    (g.lang(30006), "anilist_popular", ''),
-    (g.lang(30007), "anilist_upcoming", ''),
-    (g.lang(30008), 'anilist_all_time_popular', ''),
-    (g.lang(30009), "anilist_genres", ''),
-    (g.lang(30010), "search_history", ''),
-    (g.lang(30011), "tools", ''),
+    {"name": "Next Up", "action": "shows_next_up"},
+    {"name": g.lang(30001), "action": "anilist_airing"},
+    {"name": g.lang(30002), "action": "airing_dub"},
+    {"name": g.lang(30003), "action": "latest"},
+    {"name": g.lang(30004), "action": "latest_dub"},
+    {"name": g.lang(30005), "action": "anilist_trending"},
+    {"name": g.lang(30006), "action": "anilist_popular"},
+    {"name": g.lang(30007), "action": "anilist_upcoming"},
+    {"name": g.lang(30008), "action": "anilist_all_time_popular"},
+    {"name": g.lang(30009), "action": "anilist_genres"},
+    {"name": g.lang(30010), "action": "search_history"},
+    {"name": g.lang(30011), "action": "tools"},
 ]
 
 _TITLE_LANG = g.get_setting("titlelanguage")
@@ -106,17 +110,19 @@ def SETTINGS(payload, params):
 
 @route('clear_cache')
 def CLEAR_CACHE(payload, params):
-    database.cache_clear()
-    return control.clear_cache();
+    g.clear_cache()
 
 @route('clear_torrent_cache')
 def CLEAR_TORRENT_CACHE(payload, params):
-    return database.torrent_cache_clear()
+    return
+    # return database.torrent_cache_clear()
 
 @route('rebuild_database')
 def REBUILD_DATABASE(payload, params):
-    from resources.lib.ui.database_sync import AnilistSyncDatabase
-    AnilistSyncDatabase().re_build_database()
+        from resources.lib.database.anilist_sync import AnilistSyncDatabase
+
+        AnilistSyncDatabase().re_build_database()
+        g.clear_cache(True)
 
 @route('wipe_addon_data')
 def WIPE_ADDON_DATA(payload, params):
@@ -127,6 +133,32 @@ def WIPE_ADDON_DATA(payload, params):
 def TOGGLE_LANGUAGE_INVOKER(payload, params):
     from resources.lib.ui.maintenance import toggle_reuselanguageinvoker
     toggle_reuselanguageinvoker()    
+
+@route('show_seasons')
+def SHOW_SEASONS(payload, params):
+    import xbmcgui
+    xbmcgui.Dialog().textviewer('dssds', str(params))
+
+@route('show_episodes')
+def SHOW_EPISODES(payload, params):
+    action_args = params.get('action_args')
+    _BROWSER.show_seasons(action_args)
+
+@route('season_episodes')
+def SEASON_EPISODES(payload, params):
+    action_args = params.get('action_args')
+    _BROWSER.season_episodes(action_args)
+
+@route('mal_season_episodes')
+def MAL_SEASON_EPISODES(payload, params):
+    action_args = params.get('action_args')
+    _BROWSER.mal_season_episodes(action_args)
+    # mal_id = action_args['mal_id']
+    # item_information = control.get_item_information_mal(45576)
+    # #if not item_information:
+
+    # import xbmcgui
+    # xbmcgui.Dialog().textviewer('dsds', str(item_information))
 
 @route('animes/*')
 def ANIMES_PAGE(payload, params):
@@ -151,88 +183,89 @@ def RUN_PLAYER_DIALOGS(payload, params):
 
 @route('test')
 def TEST(payload, params):
+    anime = control.get_item_information(117193)
+    import xbmcgui
+    xbmcgui.Dialog().textviewer('dsds', str(anime))
     return
+
+@route('shows_next_up')
+def SHOWS_NEXT_UP(payload, params):
+    from resources.lib.database.anilist_sync import shows
+    from resources.lib.modules.list_builder import ListBuilder
+
+    anime = shows.AnilistSyncDatabase().get_nextup_episodes()
+    ListBuilder().mixed_episode_builder(anime, sort='episode', no_paging=True)
 
 @route('anilist_airing')
 def ANILIST_AIRING(payload, params):
+    '''
+    Anichart, need to re-add redirect to episode page
+    '''
     airing = _ANILIST_BROWSER.get_airing()
     from resources.lib.windows.anichart import Anichart
 
     anime = Anichart(*('anichart.xml', g.ADDON_DATA_PATH),
                         get_anime=_BROWSER.get_anime_init, anime_items=airing).doModal()
 
-    if not anime:
-        anime = [[], 'tvshows']
 
-    anime, content_type = anime
+    # if not anime:
+    #     anime = [[], 'tvshows']
 
-    return g.draw_items(anime, content_type)
+    # anime, content_type = anime
+
+    # return g.draw_items(anime, content_type)
+
+    return
 
 @route('airing_dub')
 def AIRING_DUB(payload, params):
-    return g.draw_items(_BROWSER.get_airing_dub())
+    _BROWSER.get_airing_dub()
 
 @route('latest')
 def LATEST(payload, params):
-    return g.draw_items(_BROWSER.get_latest(g.real_debrid_enabled(), g.premiumize_enabled()), 'episodes')
+    _BROWSER.get_latest(g.real_debrid_enabled(), g.premiumize_enabled())
 
 @route('latest_dub')
 def LATEST_DUB(payload, params):
-    return g.draw_items(_BROWSER.get_latest_dub(g.real_debrid_enabled(), g.premiumize_enabled()), 'episodes')
+    _BROWSER.get_latest_dub(g.real_debrid_enabled(), g.premiumize_enabled())
 
 @route('anilist_trending')
 def ANILIST_TRENDING(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_trending())
-
-@route('anilist_trending/*')
-def ANILIST_TRENDING_PAGES(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_trending(int(payload)))
+    _ANILIST_BROWSER.get_trending()
 
 @route('anilist_popular')
 def ANILIST_POPULAR(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_popular())
-
-@route('anilist_popular/*')
-def ANILIST_POPULAR_PAGES(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_popular(int(payload)))
+    _ANILIST_BROWSER.get_popular()
 
 @route('anilist_upcoming')
-def ANILIST_POPULAR(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_upcoming())
-
-@route('anilist_upcoming/*')
-def ANILIST_POPULAR_PAGES(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_upcoming(int(payload)))
+def ANILIST_UPCOMING(payload, params):
+    _ANILIST_BROWSER.get_upcoming()
 
 @route('anilist_all_time_popular')
 def ANILIST_ALL_TIME_POPULAR(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_all_time_popular())
-
-@route('anilist_all_time_popular/*')
-def ANILIST_ALL_TIME_POPULAR_PAGES(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_all_time_popular(int(payload)))
+    _ANILIST_BROWSER.get_all_time_popular()
 
 @route('anilist_genres')
 def ANILIST_GENRES(payload, params):
-    return g.draw_items(_ANILIST_BROWSER.get_genres(genre_dialog))
+    _ANILIST_BROWSER.get_genres()
 
-@route('anilist_genres/*')
+@route('anilist_genres_page')
 def ANILIST_GENRES_PAGES(payload, params):
-    genres, tags, page = payload.split("/")[-3:]
-    return g.draw_items(_ANILIST_BROWSER.get_genres_page(genres, tags, int(page)))
+    genres_tags = params.get('action_args')
+    _ANILIST_BROWSER.select_genres(genre_dialog, genres_tags)
 
 @route('search_history')
 def SEARCH_HISTORY(payload, params):
-    history = database.getSearchHistory('show')
+    history = SearchHistory().get_search_history("show")
     if "Yes" in g.get_setting('searchhistory') :
-        return g.draw_items(_BROWSER.search_history(history), contentType=g.get_setting("contenttype.menu"))
+        _BROWSER.search_history(history)
     else :
         return SEARCH(payload,params)
 
 @route('clear_history')
 def CLEAR_HISTORY(payload, params):
-    database.clearSearchHistory()
-    return
+    from resources.lib.database.searchHistory import SearchHistory
+    SearchHistory().clear_search_history()
 
 @route('search')
 def SEARCH(payload, params):
@@ -242,28 +275,31 @@ def SEARCH(payload, params):
 
     # TODO: Better logic here, maybe move functionatly into router?
     if "Yes" in g.get_setting('searchhistory') :
-        database.addSearchHistory(query, 'show')
-        history = database.getSearchHistory('show')
+        SearchHistory().add_search_history("show", query)
 
-    return g.draw_items(_ANILIST_BROWSER.get_search(query))
+    _ANILIST_BROWSER.get_search(query)
 
-@route('search/*')
+@route('search_results')
 def SEARCH_PAGES(payload, params):
-    query, page = payload.rsplit("/", 1)
-    return g.draw_items(_ANILIST_BROWSER.get_search(query, int(page)))
+    query = params.get('action_args')
+    _ANILIST_BROWSER.get_search(query)
 
-@route('play_latest/*')
-def PLAY(payload, params):
-    debrid_provider, hash_ = payload.rsplit('/')
+@route('play_latest')
+def PLAY_LATEST(payload, params):
+    action_args = params.get('action_args')
+    debrid_provider = action_args["debrid_provider"]
+    hash_ = action_args["hash"]
     link = _BROWSER.get_latest_sources(debrid_provider, hash_)
-    player.play_source(link)
+    player.play_source(link, action_args, None)
 
-@route('play_movie/*')
+@route('play_movie')
 def PLAY_MOVIE(payload, params):
-    anilist_id, episode, filter_lang = payload.rsplit("/")
-    sources = _BROWSER.get_sources(anilist_id, episode, filter_lang, 'movie')
-
-    _mock_args = {'anilist_id': anilist_id}
+    action_args = params.get('action_args')
+    action_args["episode"] = 1
+    anilist_id = action_args['anilist_id']
+    # # indexer = action_args.get('indexer', 'trakt')
+    sources = _BROWSER.get_sources(anilist_id, '1', "", 'movie')
+    _mock_args = {"anilist_id": anilist_id}
 
     if g.get_setting('general.playstyle.movie') == '1' or params.get('source_select'):
 
@@ -279,15 +315,20 @@ def PLAY_MOVIE(payload, params):
 
         link = resolver.doModal(sources, {}, False)
 
-    player.play_source(link,
-                        anilist_id,
-                        watchlist_update,
-                        None,
-                        int(episode))
+    # player.play_source(link,
+    #                     anilist_id,
+    #                     watchlist_update,
+    #                     None,
+    #                     int(action_args["episode"]),
+    #                     "",
+    #                     indexer=indexer)
+    player.play_source(link, action_args, watchlist_update)
 
-@route('play_gogo/*')
+@route('play_gogo')
 def PLAY_GOGO(payload, params):
-    slug, episode = payload.rsplit('/')
+    action_args = params.get('action_args')
+    slug = action_args["slug"]
+    episode = action_args["_episode"]
     from resources.lib.pages import gogoanime
     sources = gogoanime.sources()._process_gogo(slug, '', episode)
 
@@ -297,7 +338,38 @@ def PLAY_GOGO(payload, params):
     link = SourceSelect(*('source_select.xml', g.ADDON_DATA_PATH),
                         actionArgs=_mock_args, sources=sources).doModal()
 
-    player.play_source(link)
+    player.play_source(link, action_args, None)
+
+@route('get_sources')
+def GET_SOURCES(payload, params):
+    action_args = params.get('action_args')
+    anilist_id = action_args['anilist_id']
+    # # indexer = action_args.get('indexer', 'trakt')
+    sources = _BROWSER.get_sources(anilist_id, action_args["episode"], "", 'show')
+    _mock_args = {"anilist_id": anilist_id}
+
+    if g.get_setting('general.playstyle.episode') == '1' or params.get('source_select'):
+
+        from resources.lib.windows.source_select import SourceSelect
+
+        link = SourceSelect(*('source_select.xml', g.ADDON_DATA_PATH),
+                            actionArgs=_mock_args, sources=sources).doModal()
+    else:
+        from resources.lib.windows.resolver import Resolver
+
+        resolver = Resolver(*('resolver.xml', g.ADDON_DATA_PATH),
+                            actionArgs=_mock_args)
+
+        link = resolver.doModal(sources, {}, False)
+
+    # player.play_source(link,
+    #                     anilist_id,
+    #                     watchlist_update,
+    #                     None,
+    #                     int(action_args["episode"]),
+    #                     "",
+    #                     indexer=indexer)
+    player.play_source(link, action_args, watchlist_update)
 
 @route('play/*')
 def PLAY(payload, params):
@@ -356,17 +428,28 @@ def TOOLS_MENU(payload, params):
         (g.lang(30024), "wipe_addon_data", ''),
         ]
 
-    return g.draw_items(
-        [g.allocate_item(name, url, False, image) for name, url, image in TOOLS_ITEMS],
-        contentType=g.get_setting("contenttype.menu"),
-    )
+    for name, url, image in TOOLS_ITEMS:
+        g.add_directory_item(
+            name,
+            action=url,
+            is_folder=False
+        )
+    g.close_directory(g.CONTENT_FOLDER)
 
 @route('')
 def LIST_MENU(payload, params):
-    return g.draw_items(
-        [g.allocate_item(name, url, True, image) for name, url, image in MENU_ITEMS],
-        contentType=g.get_setting("contenttype.menu"),
-    )
+    for item in MENU_ITEMS:
+        g.add_directory_item(
+            item.get("name"),
+            action=item.get("action"),
+            action_args=item.get("args"),
+            menu_item=item.get("menu_item"),
+        )
+    g.close_directory(g.CONTENT_FOLDER)
+    # return g.draw_items(
+    #     [g.allocate_item(name, url, True, image) for name, url, image in MENU_ITEMS],
+    #     contentType=g.get_setting("contenttype.menu"),
+    # )
 
 set_browser(_BROWSER)
 _add_last_watched()

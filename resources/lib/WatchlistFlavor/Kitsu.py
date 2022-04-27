@@ -68,7 +68,7 @@ class KitsuWLF(WatchlistFlavorBase):
 
         return headers
 
-    def _handle_paging(self, hasNextPage, base_url, page):
+    def _handle_paging(self, hasNextPage, status, page):
         if not hasNextPage:
             return []
 
@@ -77,7 +77,13 @@ class KitsuWLF(WatchlistFlavorBase):
         name = "Next Page (%d)" %(next_page)
         parsed = urllib.parse.urlparse(hasNextPage)
         offset = urllib.parse.parse_qs(parsed.query)['page[offset]'][0]
-        return self._parse_view({'name':name, 'url': base_url % (offset, next_page), 'image': None, 'plot': None})
+
+        g.add_directory_item(
+            name,
+            action='watchlist_status_type_pages',
+            action_args={"flavor": "kitsu", "status": status, "offset": offset, "page": next_page},
+        )
+        # return self._parse_view({'name':name, 'url': base_url % (offset, next_page), 'image': None, 'plot': None})
 
     def watchlist(self):
         params = {"filter[user_id]": self._user_id}
@@ -95,13 +101,16 @@ class KitsuWLF(WatchlistFlavorBase):
         return self._parse_view(base)
 
     def _process_watchlist_status_view(self, url, params, base_plugin_url, page):
-        all_results = list(map(self._base_watchlist_status_view, self.__kitsu_statuses()))
-        all_results = list(itertools.chain(*all_results))
-        return all_results
+        for name, status in self.__kitsu_statuses():
+            g.add_directory_item(
+                name,
+                action='watchlist_status_type',
+                action_args={"flavor": "kitsu", "status": status}
+            )
+        g.close_directory(g.CONTENT_FOLDER)
 
     def __kitsu_statuses(self):
         statuses = [
-            ("Next Up", "current?next_up=true"),
             ("Current", "current"),
             ("Want to Watch", "planned"),
             ("Completed", "completed"),
@@ -111,7 +120,7 @@ class KitsuWLF(WatchlistFlavorBase):
 
         return statuses
 
-    def get_watchlist_status(self, status, next_up, offset=0, page=1):
+    def get_watchlist_status(self, status, offset=0, page=1):
         url = self._to_url("edge/library-entries")
 
         params = {
@@ -125,28 +134,26 @@ class KitsuWLF(WatchlistFlavorBase):
             "sort": self.__get_sort(),
             }
 
-        return self._process_watchlist_view(url, params, next_up, "watchlist_status_type_pages/kitsu/%s/%%s/%%d" % status, page)
+        return self._process_watchlist_view(url, params, status, page)
 
-    def _process_watchlist_view(self, url, params, next_up, base_plugin_url, page):
+    def _process_watchlist_view(self, url, params, status, page):
         result = (self._get_request(url, headers=self.__headers(), params=params)).json()
         _list = result["data"]
         el = result["included"][:len(_list)]
         self._mapping = [x for x in result['included'] if x['type'] == 'mappings']
 
-        if next_up:
-            all_results = list(map(self._base_next_up_view, _list, el))
-        else:
-            all_results = list(map(self._base_watchlist_view, _list, el))
+        all_results = list(map(self._base_watchlist_view, _list, el))
+        page = self._handle_paging(result['links'].get('next'), status, page)
 
-        all_results = list(itertools.chain(*all_results))
+        g.close_directory(g.CONTENT_SHOW)
+        # all_results = list(itertools.chain(*all_results))
 
-        all_results += self._handle_paging(result['links'].get('next'), base_plugin_url, page)
-        return all_results
+        # all_results += self._handle_paging(result['links'].get('next'), base_plugin_url, page)
+        # return all_results
 
     def _base_watchlist_view(self, res, eres):
         _id = eres['id']
         mal_id = self._mapping_mal(_id)
-##        kodi_meta = self._get_kodi_meta(mal_id, 'mal')
 
         info = {}
 
@@ -156,7 +163,9 @@ class KitsuWLF(WatchlistFlavorBase):
             pass
 
         try:
-            info['title'] = eres["attributes"]["titles"].get(self.__get_title_lang(), eres["attributes"]['canonicalTitle'])
+            title = eres["attributes"]["titles"].get(self.__get_title_lang(), eres["attributes"]['canonicalTitle'])
+            title = title.encode('ascii','ignore').decode("utf-8")
+            info['title'] = title
         except:
             pass
 
@@ -165,23 +174,54 @@ class KitsuWLF(WatchlistFlavorBase):
         except:
             pass
 
-        info['mediatype'] = 'tvshow'
+        if eres['attributes']['subtype'] == 'movie' and eres['attributes']['episodeCount'] == 1:
+            info['mediatype'] = 'movie'
+            action = 'show_seasons'
+        else:
+            info['mediatype'] = 'tvshow'
+            action = 'mal_season_episodes'
 
-        base = {
-            "name": '%s - %d/%d' % (eres["attributes"]["titles"].get(self.__get_title_lang(), eres["attributes"]['canonicalTitle']),
-                                    res["attributes"]['progress'],
-                                    eres["attributes"]['episodeCount'] if eres["attributes"]['episodeCount'] is not None else 0),
-            "url": "watchlist_to_ep/%s/%s/%s" % (mal_id, _id, res["attributes"]['progress']),
-            "image": eres["attributes"]['posterImage']['large'],
-            "plot": info,
+        image = eres["attributes"]['posterImage']['large']
+
+        art = {
+            'poster': image,
+            'fanart': image,
+            'keyart': image,
         }
 
-        if eres['attributes']['subtype'] == 'movie' and eres['attributes']['episodeCount'] == 1:
-            base['url'] = "watchlist_to_movie/%s" % (mal_id)
-            base['plot']['mediatype'] = 'movie'
-            return self._parse_view(base, False)
+        menu_item = {
+            'art': art,
+            'info': info
+        }
 
-        return self._parse_view(base)
+        name = '{} - {}/{}'.format(
+            title,
+            res["attributes"]['progress'],
+            eres["attributes"].get('episodeCount', 0)
+        )
+
+        g.add_directory_item(
+            name,
+            action=action,
+            action_args={"mal_id": mal_id},
+            menu_item=menu_item
+        )
+
+        # base = {
+        #     "name": '%s - %d/%d' % (eres["attributes"]["titles"].get(self.__get_title_lang(), eres["attributes"]['canonicalTitle']),
+        #                             res["attributes"]['progress'],
+        #                             eres["attributes"]['episodeCount'] if eres["attributes"]['episodeCount'] is not None else 0),
+        #     "url": "watchlist_to_ep/%s/%s/%s" % (mal_id, _id, res["attributes"]['progress']),
+        #     "image": eres["attributes"]['posterImage']['large'],
+        #     "plot": info,
+        # }
+
+        # if eres['attributes']['subtype'] == 'movie' and eres['attributes']['episodeCount'] == 1:
+        #     base['url'] = "watchlist_to_movie/%s" % (mal_id)
+        #     base['plot']['mediatype'] = 'movie'
+        #     return self._parse_view(base, False)
+
+        # return self._parse_view(base)
 
     def _base_next_up_view(self, res, eres):
         _id = eres['id']
@@ -260,7 +300,7 @@ class KitsuWLF(WatchlistFlavorBase):
 
         anime_entry = {}
         anime_entry['eps_watched'] = item_dict['progress']
-        anime_entry['status'] = item_dict['status']
+        anime_entry['status'] = item_dict['status'].title()
         anime_entry['score'] = item_dict['ratingTwenty']
 
         return anime_entry
