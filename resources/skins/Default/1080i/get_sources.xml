@@ -20,6 +20,7 @@
             <left>0</left>
             <width>1920</width>
             <height>1080</height>
+            <aspectratio>keep</aspectratio>
             <texture background="true">$INFO[Window().Property(item.art.fanart)]</texture>
         </control>
 
