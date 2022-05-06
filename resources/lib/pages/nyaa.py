@@ -320,7 +320,7 @@ class sources(BrowserBase):
         mapfunc = partial(self._parse_nyaa_episode_view, episode=episode)
         all_results = list(map(mapfunc, cache_list))
         # Sort list to put torrents with extras/specials at bottom of list.
-        all_results = sorted(all_results, key=lambda x: x['release_title'].lower().find('extra') != -1 or x['release_title'].lower().find('special') != -1)
+        all_results = sorted(all_results, key=lambda x: x['release_title'].lower().find('extra') != -1 or x['release_title'].lower().find('special') != -1 or x['release_title'].lower().find('movie') != -1)
         return all_results
 
     def _process_nyaa_movie(self, url, episode):
@@ -395,7 +395,8 @@ class sources(BrowserBase):
             else:
                 tmpShow += '|' + tmplist[i]
         query = tmpShow
-
+        if 'case closed' in query.lower():
+            query = '(Detective Conan)'
         sources = self._get_episode_sources(query, anilist_id, episode, status, rescrape)
 
         if not sources:
@@ -418,8 +419,10 @@ class sources(BrowserBase):
         #     pass
 
         # Query... ex 'SPY X FAMILY - 02'
-        query = '%s "- %s"' % (show, episode.zfill(2))
-
+        if 'one piece' in show.lower() or 'detective conan' in show.lower():
+            query = '%s "- %s"' % (show, episode.zfill(3))
+        else:
+            query = '%s "- %s"' % (show, episode.zfill(2))
         # Hard Coded seasons that are weird and have second parts that have their own anilist entry.
         if anilist_id in {113538, 119661, 104578, 116742, 127720}:
             anilist_season = {
@@ -433,16 +436,27 @@ class sources(BrowserBase):
             season = [{"info": {"season": anilist_season[anilist_id]}}]
         else:
             season = shows.AnilistSyncDatabase().get_season_list(anilist_id, None, no_paging=True, smart_play=True)
+        # if no season from anilist, check for name shenanigans
         if season:
-            season = str(season[0]["info"]['season']).zfill(2)
-            query += '|"S%sE%s "' %(season, episode.zfill(2))
-            query += '|"S%s - %s "' %(season[1], episode.zfill(2))
-            query += '|"S%s - %s "' %(season[1], episode)
+            if 'one piece' in show.lower() or 'detective conan' in show.lower():
+                season = str(season[0]["info"]['season']).zfill(3)
+                query += '|"S%sE%s "' % (season, episode.zfill(3))
+                query += '|"S%s - %s "' % (season[1], episode.zfill(3))
+                query += '|"S%s - %s "' % (season[1], episode)
+            else:
+                season = str(season[0]["info"]['season']).zfill(2)
+                query += '|"S%sE%s "' %(season, episode.zfill(2))
+                query += '|"S%s - %s "' %(season[1], episode.zfill(2))
+                query += '|"S%s - %s "' %(season[1], episode)
 
-        url = "https://nyaa.si/?f=0&c=1_2&q=%s&s=downloads&o=desc" % query            
+        url = "https://nyaa.si/?f=0&c=1_2&q=%s&s=downloads&o=desc" % query
 
+        if 'one piece' in show.lower() or 'detective conan' in show.lower():
+            ret = self._process_nyaa_episodes(url, episode.zfill(3), season) + self._get_episode_sources_pack(show, anilist_id, episode, season)
+            ret = [x for x in ret if not (x['release_title'].lower().find('movie') != -1 and x['release_title'].lower().find('+ movie') == -1)]
+            return ret
         if status == 'FINISHED':
-            return self._get_episode_sources_pack(show, anilist_id, episode, season)
+            return self._process_nyaa_episodes(url, episode.zfill(2), season) + self._get_episode_sources_pack(show, anilist_id, episode, season)
 
         return self._process_nyaa_episodes(url, episode.zfill(2), season)
 
@@ -469,7 +483,10 @@ class sources(BrowserBase):
         # except:
         #     pass
 
-        query = '%s "- %s"' % (control.decode_py2(show), episode.zfill(2))
+        if 'one piece' in show.lower() or 'detective conan' in show.lower():
+            query = '%s "- %s"' % (control.decode_py2(show), episode.zfill(3))
+        else:
+            query = '%s "- %s"' % (control.decode_py2(show), episode.zfill(2))
         if anilist_id in {113538, 119661, 104578, 116742, 127720}:
             anilist_season = {
                 113538: 4,
@@ -483,8 +500,12 @@ class sources(BrowserBase):
         else:
             season = shows.AnilistSyncDatabase().get_season_list(anilist_id, None, no_paging=True, smart_play=True)
         if season:
-            season = str(season[0]['info']['season']).zfill(2)
-            query += '|"S%sE%s"' %(season, episode.zfill(2))
+            if 'one piece' in show.lower() or 'detective conan' in show.lower():
+                season = str(season[0]['info']['season']).zfill(3)
+                query += '|"S%sE%s"' % (season, episode.zfill(3))
+            else:
+                season = str(season[0]['info']['season']).zfill(2)
+                query += '|"S%sE%s"' %(season, episode.zfill(2))
 
         url = "https://nyaa.si/?f=0&c=1_2&q=%s" % query
         return self._process_nyaa_episodes(url, episode, season)
@@ -496,7 +517,10 @@ class sources(BrowserBase):
         item_information = control.get_item_information(anilist_id)
         episodes = item_information["episode_count"]
         if episodes:
-            query += '|"01-{0}"|"01~{0}"|"01 - {0}"|"01 ~ {0}"'.format(episodes)
+            if 'one piece' in show.lower() or 'detective conan' in show.lower():
+                query += '|"001-{0}"|"001~{0}"|"001 - {0}"|"001 ~ {0}"'.format(episodes)
+            else:
+                query += '|"01-{0}"|"01~{0}"|"01 - {0}"|"01 ~ {0}"'.format(episodes)
 
         if season:
             query += '|"S{0}"|"Season {0}"'.format(season)
