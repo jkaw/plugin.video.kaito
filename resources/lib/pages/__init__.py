@@ -173,7 +173,7 @@ class Sources(DisplayWindow):
             if g.premiumize_enabled() and g.get_setting('premiumize.cloudInspection') == 'true':
                 debrid['premiumize'] = True
 
-            self.usercloudSources = debrid_cloudfiles.sources().get_sources(debrid, query, episode)
+            self.usercloudSources = debrid_cloudfiles.sources().get_sources(debrid, query, episode, anilist_id)
             self.cloud_files += self.usercloudSources
 
         self.remainingProviders.remove('Cloud Inspection')
@@ -270,7 +270,6 @@ class Sources(DisplayWindow):
 
         if g.get_setting('general.hidedub') == 'true':
             sortedList = [i for i in sortedList if i['lang'] != 2]
-
         return sortedList
 
     def colorNumber(self, number):
