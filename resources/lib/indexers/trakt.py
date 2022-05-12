@@ -1104,8 +1104,9 @@ class TRAKTAPI(object):
         if 'english' in title_language:
             title = item_information['info']['title']
         else:
-            title = item_information['info']['aliases']
-        title = re.sub('[^A-Za-z0-9 ()]', ' ', title)
+            split_title = item_information['info']['aliases'].split(")")
+            title = split_title[1]
+        title = re.sub('[^A-Za-z0-9]', ' ', title)
         url = 'search/show?query=%s&genres=anime&extended=full' % title
         result = self._json_request(url)
         if not result:
