@@ -4,6 +4,7 @@ from __future__ import absolute_import, division, unicode_literals
 from resources.lib.database import anilist_sync
 from resources.lib.ui import database
 from resources.lib.ui.globals import g
+from resources.lib.ui.thread_pool import ThreadPool
 from resources.lib.modules.guard_decorators import (
     guard_against_none,
     guard_against_none_or_empty,
@@ -542,9 +543,10 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
     @guard_against_none(list)
     def _update_objects(self, db_list_to_update, media_type):
 
+        threadpool = ThreadPool()
         for i in db_list_to_update:
-            self.task_queue.put(self.metadataHandler.update, i)
-        updated_items = self.task_queue.wait_completion()
+            threadpool.put(self.metadataHandler.update, i)
+        updated_items = threadpool.wait_completion()
 
         if updated_items is None:
             return
