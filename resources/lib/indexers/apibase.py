@@ -2,15 +2,11 @@
 from __future__ import absolute_import, division, unicode_literals
 
 import types
-from collections import OrderedDict
 from functools import wraps
 
-from resources.lib.ui.exceptions import NormalizationFailure
-from resources.lib.ui.globals import g
-from resources.lib.ui import control
-
-if g.PYTHON3:
-    basestring = str
+from resources.lib.common import tools
+from resources.lib.modules.exceptions import NormalizationFailure
+from resources.lib.modules.globals import g
 
 
 def handle_single_item_or_list(func):
@@ -27,6 +23,7 @@ def handle_single_item_or_list(func):
             return results
         return func(*args, **kwargs)
     return wrapper
+
 
 class ApiBase(object):
     @staticmethod
@@ -56,7 +53,7 @@ class ApiBase(object):
 
     @staticmethod
     def _fill_no_transform(key, info, value):
-        if isinstance(key, basestring):
+        if isinstance(key, (g.UNICODE, str)):
             value = ApiBase._when_list_extend(info.get(key), value)
             if value is not None and value != "":
                 info[key] = value
@@ -68,15 +65,15 @@ class ApiBase(object):
 
     @staticmethod
     def _get_value(data_key, info, item):
-        if isinstance(data_key, basestring):
+        if isinstance(data_key, (g.UNICODE, str)):
             value = item.get(data_key, info.get(data_key))
         elif data_key:
             value = item
             for subkey in data_key:
-                if isinstance(subkey, int):
-                    value = value[subkey]
-                else:
+                if isinstance(value, dict):
                     value = value.get(subkey, {})
+                elif isinstance(value, list):
+                    value = value[subkey]
         else:
             value = None
         return value
@@ -91,7 +88,7 @@ class ApiBase(object):
                     self._fill_no_transform(key, info, value)
                 if not transform:
                     continue
-                if isinstance(key, basestring):
+                if isinstance(key, (g.UNICODE, str)):
                     self._do_transform_single(info, transform, key, item, value, data_key)
                 elif isinstance(key, tuple):
                     self._do_transform_multiple(
@@ -107,7 +104,7 @@ class ApiBase(object):
         result = value
         if isinstance(possible_array, list):
             result = sorted(
-                OrderedDict.fromkeys(control.extend_array(possible_array, value))
+                set(tools.extend_array(possible_array, value))
             )
         if isinstance(result, list) and len(result) == 0:
             result = None

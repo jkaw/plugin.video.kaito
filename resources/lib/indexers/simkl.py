@@ -9,13 +9,13 @@ import ast
 from functools import partial
 from functools import wraps
 from .tmdb import TMDBAPI
-from ..ui import database
-from resources.lib.ui import control
+from ..modules import database
+from resources.lib.common import tools
 from resources.lib.indexers.apibase import (
     ApiBase,
     handle_single_item_or_list,
 )
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from resources.lib.database.cache import use_cache
 from resources.lib.database.anilist_sync import shows
 
@@ -43,7 +43,7 @@ class SIMKLAPI(ApiBase):
         self.request_response = None
         self.threads = []
         self.shows_database = shows.AnilistSyncDatabase()
-        self.meta_hash = control.md5_hash((self.baseUrl, self.imageBaseUrl))
+        self.meta_hash = tools.md5_hash((self.baseUrl, self.imageBaseUrl))
 
         self.artwork_url_structure = {
             "fanart": "fanart/{}_medium.jpg",
@@ -55,7 +55,7 @@ class SIMKLAPI(ApiBase):
             ("description", ("plot", "plotoutline"), None),
         ]
 
-        self.Normalization = control.extend_array(
+        self.Normalization = tools.extend_array(
             [
                 (("ids", "simkl_id"), "simkl_id", None),
                 (("ids", "tmdb_id"), "tmdb_id", None),
@@ -64,7 +64,7 @@ class SIMKLAPI(ApiBase):
             self.TranslationNormalization,
         )
 
-        self.MoviesNormalization = control.extend_array(
+        self.MoviesNormalization = tools.extend_array(
             [
                 ("plays", "playcount", None),
                 ("year", "year", None),
@@ -73,7 +73,7 @@ class SIMKLAPI(ApiBase):
             self.Normalization,
         )
 
-        self.ShowNormalization = control.extend_array(
+        self.ShowNormalization = tools.extend_array(
             [
                 ("status", "status", None),
                 ("status", "is_airing", lambda t: not t == "ended"),
@@ -88,7 +88,7 @@ class SIMKLAPI(ApiBase):
             self.Normalization,
         )
 
-        self.SeasonNormalization = control.extend_array(
+        self.SeasonNormalization = tools.extend_array(
             [
                 ("number", ("season", "sortseason"), None),
                 ("episode_count", "episode_count", None),
@@ -109,7 +109,7 @@ class SIMKLAPI(ApiBase):
             self.Normalization,
         )
 
-        self.EpisodeNormalization = control.extend_array(
+        self.EpisodeNormalization = tools.extend_array(
             [
                 ("episode", ("episode", "sortepisode"), None),
                 ("season", ("season", "sortseason"), None),
@@ -175,7 +175,7 @@ class SIMKLAPI(ApiBase):
 
     def get(self, url, **params):
         return self.session.get(
-            control.urljoin(self.baseUrl, url),
+            tools.urljoin(self.baseUrl, url),
             data=params,
         )
 
@@ -304,28 +304,25 @@ class SIMKLAPI(ApiBase):
             url += filter_lang
         
         name = 'Ep. %d (%s)' % (res['episode'], res.get('title'))
-        image =  self.imageBaseUrl % res['img']
+        #image =  self.imageBaseUrl % res['img']
         info = {}
         info['plot'] = res['description']
         info['title'] = res['title']
         info['season'] = 1
         info['episode'] = res['episode']
-        try:
-            if int(eps_watched) >= res['episode']:
-                info['playcount'] = 1
-        except:
-            pass
+
         try:
             info['aired'] = res['date'][:10]
         except:
             pass
-        info['tvshowtitle'] = ast.literal_eval(database.get_show(anilist_id)['kodi_meta'])['title_userPreferred']
+        import pickle
+        info['tvshowtitle'] = pickle.loads(database.get_show(anilist_id)['info'])['title']
         info['mediatype'] = 'episode'
-        parsed = g.allocate_item(name, "play/" + str(url), False, image, info, fanart, poster, True)
+        parsed = g.allocate_item(name, "play/" + str(url), False, None, info, None, None, True)
         return parsed
 
     def _process_episode_view(self, anilist_id, json_resp, filter_lang, base_plugin_url, page):
-        kodi_meta = ast.literal_eval(database.get_show(anilist_id)['kodi_meta'])
+        kodi_meta = database.get_show(anilist_id)['info']
         fanart = kodi_meta.get('fanart')
         poster = kodi_meta.get('poster')
         eps_watched = kodi_meta.get('eps_watched')
@@ -339,10 +336,10 @@ class SIMKLAPI(ApiBase):
         show = database.get_show(anilist_id)
 
         if show['simkl_id']:
-            return self.get_episodes(anilist_id, filter_lang), 'episodes'
+            return self.get_episodes(show['simkl_id'], tools.get_item_information(anilist_id)), 'episodes'
 
-        show_meta = show['meta_ids']
-        kodi_meta = ast.literal_eval(show['kodi_meta'])
+        import pickle
+        kodi_meta = pickle.loads(show['info'])
         mal_id = show['mal_id']
 
         if not mal_id:
@@ -350,15 +347,15 @@ class SIMKLAPI(ApiBase):
             database.add_mapping_id(anilist_id, 'mal_id', str(mal_id))
 
         simkl_id = str(self.get_anime_id(mal_id))
+        #import web_pdb
+        #web_pdb.set_trace()
         database.add_mapping_id(anilist_id, 'simkl_id', simkl_id)
-        if show_meta:
-            show_meta = ast.literal_eval(show['meta_ids'])
-            if not kodi_meta.get('fanart'):
-                kodi_meta['fanart'] = TMDBAPI().showFanart(show_meta).get('fanart')
-                database.update_kodi_meta(int(anilist_id), kodi_meta)
+        #if show:
+            #if not kodi_meta.get('fanart'):
+                #kodi_meta['fanart'] = TMDBAPI().showFanart(show).get('fanart')
+                #database.update_kodi_meta(int(anilist_id), kodi_meta)
 
-
-        return self.get_episodes(anilist_id, filter_lang), 'episodes'
+        return self.get_episodes(simkl_id, tools.get_item_information(anilist_id)), 'episodes'
 
     def _get_episodes(self, anilist_id):
         simkl_id = database.get_show(anilist_id)['simkl_id']
@@ -399,6 +396,7 @@ class SIMKLAPI(ApiBase):
             "anime/episodes/{}?extended=full".format(simkl_id)
         )
         episodes = [episode for episode in episodes if episode.get("type") == "episode"]
+        ret = []
         for episode in episodes:
             episode.update(
                 {
@@ -407,8 +405,13 @@ class SIMKLAPI(ApiBase):
                     "args": self._create_args(item_information, episode["episode"]),
                 }
             )
-        
-        return self._handle_response(episodes)
+            if g.get_bool_setting('general.menus'):
+                tmp = self._parse_episode_view(episode, item_information['anilist_id'], None, None, item_information['watched_episodes'], None)
+                ret.append(tmp)
+        if g.get_bool_setting("general.menus"):
+            return ret
+        else:
+            return self._handle_response(episodes)
 
 
     def get_simkl_id(self, item_information):
@@ -434,6 +437,19 @@ class SIMKLAPI(ApiBase):
 
         return simkl_id
 
+    def get_anime_id(self, mal_id):
+        data = {
+            "mal": mal_id,
+            "client_id": self.ClientID,
+        }
+        url = self._to_url("search/id")
+        json_resp = self._json_request(url, data)
+        if not json_resp:
+            return []
+
+        anime_id = json_resp[0]['ids'].get('simkl')
+        return anime_id
+
     def get_mal_id(self, anilist_id):
         arm_resp = self._json_request("https://armkai.vercel.app/api/search?type=anilist&id={}".format(anilist_id))
         mal_id = arm_resp["mal"]
@@ -449,4 +465,4 @@ class SIMKLAPI(ApiBase):
             "trakt_season_id": None,
             "indexer": "simkl",
         }
-        return control.quote(json.dumps(args, sort_keys=True))
+        return tools.quote(json.dumps(args, sort_keys=True))

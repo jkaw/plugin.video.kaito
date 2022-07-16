@@ -5,9 +5,9 @@ import datetime
 
 import xbmcplugin
 
-from resources.lib.ui import control
+from resources.lib.common import tools
 from resources.lib.database.anilist_sync import shows
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 
 
 class ListBuilder(object):
@@ -22,7 +22,7 @@ class ListBuilder(object):
         self.flatten_episodes = g.get_bool_setting("general.flatten.episodes")
         self.page_limit = 20 # g.get_int_setting("item.limit")
         self.hide_unaired = g.get_bool_setting("general.hideUnAired")
-        self.list_title_appends = None # g.get_int_setting("general.appendListTitles")
+        self.list_title_appends = g.get_int_setting("general.appendListTitles")
         self.show_original_title = g.get_bool_setting(
             "general.meta.showoriginaltitle", False
         )
@@ -34,11 +34,10 @@ class ListBuilder(object):
         :param params: Parameters to send to common_menu_builder method
         :return: List list_items if smart_play Kwarg is True else None
         """
-        # return shows.AnilistSyncDatabase().get_season_list(show_id, **params)
         return self._common_menu_builder(
             shows.AnilistSyncDatabase().get_season_list(show_id, trakt_show_id, **params),
             g.CONTENT_SEASON,
-            "season_episodes",
+            "seasonEpisodes",
             **params
         )
 
@@ -52,15 +51,7 @@ class ListBuilder(object):
         """
         params["is_folder"] = False
         params["is_playable"] = True
-        action = "get_sources"
-
-        # return shows.AnilistSyncDatabase().get_episode_list(
-        #         anilist_id,
-        #         trakt_show_id,
-        #         trakt_season,
-        #         minimum_episode=params.pop("minimum_episode", None),
-        #         **params
-        #         )
+        action = "getSources"
 
         return self._common_menu_builder(
             shows.AnilistSyncDatabase().get_episode_list(
@@ -85,7 +76,7 @@ class ListBuilder(object):
         """
         params["is_folder"] = False
         params["is_playable"] = True
-        action = "get_sources"
+        action = "getSources"
 
         # return shows.AnilistSyncDatabase().get_episode_list(
         #         anilist_id,
@@ -117,7 +108,7 @@ class ListBuilder(object):
         params["is_folder"] = False
         params["is_playable"] = True
         params["mixed_list"] = True
-        action = "get_sources"
+        action = "getSources"
 
         return self._common_menu_builder(
             shows.AnilistSyncDatabase().get_mixed_episode_list(trakt_list, **params),
@@ -128,12 +119,12 @@ class ListBuilder(object):
 
     def show_list_builder(self, trakt_list, **params):
         """
-        Builds a mneu list of shows
+        Builds a menu list of shows
         :param trakt_list: List of show objects
         :param params: Parameters to send to common_menu_builder method
         :return: List list_items if smart_play Kwarg is True else None
         """
-        action = "show_episodes"
+        action = "showEpisodes"
         # if g.get_bool_setting("smartplay.clickresume"):
         #     params["is_folder"] = False
         #     params["is_playable"] = True
@@ -171,10 +162,10 @@ class ListBuilder(object):
         :param params: Parameters to send to common_menu_builder method
         :return: List list_items if smart_play Kwarg is True else None
         """
-        self._common_menu_builder(trakt_list, g.CONTENT_FOLDER, "traktList", **params)
+        self._common_menu_builder(trakt_list, g.CONTENT_MENU, "traktList", **params)
 
     def _common_menu_builder(
-        self, trakt_list, content_type, action="get_sources", **params
+        self, trakt_list, content_type, action="getSources", **params
     ):
         if len(trakt_list) == 0:
             g.log("We received no titles to build a list", "warning")
@@ -194,6 +185,8 @@ class ListBuilder(object):
 
         params.pop("hide_unaired", None)
         params.pop("hide_watched", None)
+        params.pop("ignore_cache", None)
+
         try:
             params["bulk_add"] = True
             list_items = [
@@ -224,32 +217,39 @@ class ListBuilder(object):
             raise e
 
         finally:
-            # if not smart_play:
-            #     if (
-            #         not (
-            #             g.FROM_WIDGET and g.get_bool_setting("general.widget.hide_next")
-            #         )
-            #         and not no_paging
-            #         and len(list_items) >= self.page_limit
-            #     ):
-            if not no_paging:
-                g.REQUEST_PARAMS["page"] = g.PAGE + 1
-                if next_args:
-                    g.REQUEST_PARAMS["action_args"] = next_args
-                elif g.REQUEST_PARAMS.get("action_args") is not None:
-                    g.REQUEST_PARAMS["action_args"] = g.REQUEST_PARAMS.get("action_args")
-                params = g.REQUEST_PARAMS
-                params.update({"special_sort": "bottom"})
-                g.add_directory_item("Next Page ({})".format(g.PAGE + 1), **params)
-            g.close_directory(content_type, sort=sort)
+            if not smart_play:
+                if (
+                    not (
+                        g.FROM_WIDGET and g.get_bool_setting("general.widget.hide_next")
+                    )
+                    and not no_paging
+                    and len(list_items) >= self.page_limit
+                ):
+                    g.REQUEST_PARAMS["page"] = g.PAGE + 1
+                    if next_args:
+                        g.REQUEST_PARAMS["action_args"] = next_args
+                    elif g.REQUEST_PARAMS.get("action_args") is not None:
+                        g.REQUEST_PARAMS["action_args"] = g.REQUEST_PARAMS.get("action_args")
+                    params = g.REQUEST_PARAMS
+                    params.update({"special_sort": "bottom"})
+                    g.add_directory_item(
+                        "Next Page ({})".format(g.PAGE + 1),
+                        menu_item={
+                            "art": dict.fromkeys(
+                                ['icon', 'poster', 'thumb', 'fanart'], g.NEXT_PAGE_ICON
+                            )
+                        },
+                        **params
+                    )
+                g.close_directory(content_type, sort=sort)
 
-    def is_aired(self, info):
+    def is_aired(self, item):
         """
         Confirms supplied item has aired based on meta
         :param info: Meta of item
         :return: Bool, True if object has aired else False
         """
-        air_date = info.get("aired", info.get("premiered"))
+        air_date = item.get("air_date", item["info"].get("aired", item["info"].get("premiered")))
 
         if not air_date:
             return False
@@ -263,10 +263,10 @@ class ListBuilder(object):
             time_format = g.DATE_FORMAT
 
         if self.date_delay:
-            air_date = control.parse_datetime(air_date, time_format, False)
+            air_date = tools.parse_datetime(air_date, time_format, False)
             air_date += datetime.timedelta(days=1)
         else:
-            air_date = control.parse_datetime(air_date, time_format, False)
+            air_date = tools.parse_datetime(air_date, time_format, False)
 
         if air_date >= datetime.datetime.utcnow():
             return False
@@ -282,10 +282,8 @@ class ListBuilder(object):
         if not item:
             return
 
-        # if self.show_original_title and item.get("info", {}).get("originaltitle"):
-        #     name = item.get("info", {}).get("originaltitle")
-        if item.get("info", {}).get("progress_title"):
-            name = item.get("info", {}).get("progress_title")
+        if self.show_original_title and item.get("info", {}).get("originaltitle"):
+            name = item.get("info", {}).get("originaltitle")
         else:
             name = item.get("info", {}).get("title")
 
@@ -295,9 +293,9 @@ class ListBuilder(object):
         if (
             not item["info"]["mediatype"] == "list"
             and not self.hide_unaired
-            and not self.is_aired(item["info"])
+            and not self.is_aired(item)
         ):
-            name = g.color_string(control.italic_string(name), "red")
+            name = g.color_string(tools.italic_string(name), "red")
 
         if (
             item["info"]["mediatype"] == "movie"
@@ -323,9 +321,11 @@ class ListBuilder(object):
             )
 
         if not item["info"]["mediatype"] == "list" and prepend_date:
-            release_date = control.utc_to_local(item["info"].get("aired", None))
+            release_date = g.utc_to_local(item.get("air_date", item["info"].get("aired", None)))
             if release_date:
-                release_day = control.parse_datetime(release_date, g.DATE_TIME_FORMAT).strftime("%d %b")
+                release_day = tools.parse_datetime(release_date, g.DATE_TIME_FORMAT, date_only=False).strftime(
+                    "{} @ {}".format("%a %d %b", g.KODI_TIME_NO_SECONDS_FORMAT)
+                )
                 name = "[{}] {}".format(release_day, name)
         item.update({"name": name})
         item["info"]["title"] = name

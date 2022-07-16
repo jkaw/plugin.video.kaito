@@ -1,40 +1,25 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, division, unicode_literals
 
-from collections import OrderedDict
 from functools import wraps
 
-import requests
-import xbmc
 import xbmcgui
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-from resources.lib.ui import control
+from resources.lib.common import tools
+from resources.lib.common.tools import cached_property
 from resources.lib.database.cache import use_cache
 from resources.lib.indexers.apibase import ApiBase, handle_single_item_or_list
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 
 
 def tmdb_guard_response(func):
     @wraps(func)
     def wrapper(*args, **kwarg):
+        import requests
         try:
             response = func(*args, **kwarg)
             if response.status_code in [200, 201]:
                 return response
-
-            if "Retry-After" in response.headers:
-                # API REQUESTS Are not being throttled anymore but we leave it here for if the re-enable it again
-                throttle_time = response.headers["Retry-After"]
-                g.log(
-                    "TMDb Throttling Applied, Sleeping for {} seconds".format(
-                        throttle_time
-                    ),
-                    "",
-                )
-                xbmc.sleep((int(throttle_time) * 1000) + 1)
-                return wrapper(*args, **kwarg)
 
             g.log(
                 "TMDb returned a {} ({}): while requesting {}".format(
@@ -49,7 +34,7 @@ def tmdb_guard_response(func):
             return None
         except Exception:
             xbmcgui.Dialog().notification(
-                g.ADDON_NAME, "TMDb"
+                g.ADDON_NAME, g.get_language_string(30024).format("TMDb")
             )
             if g.get_runtime_setting("run.mode") == "test":
                 raise
@@ -78,14 +63,12 @@ class TMDBAPI(ApiBase):
         (
             "keywords",
             "tag",
-            lambda t: sorted(OrderedDict.fromkeys(v["name"] for v in t["keywords"])),
+            lambda t: sorted(set(v["name"] for v in t["keywords"])),
         ),
         (
             "genres",
             "genre",
-            lambda t: sorted(
-                OrderedDict.fromkeys(x.strip() for v in t for x in v["name"].split("&"))
-            ),
+            lambda t: sorted(set(x.strip() for v in t for x in v["name"].split("&"))),
         ),
         ("certification", "mpaa", None),
         ("imdb_id", ("imdbnumber", "imdb_id"), None),
@@ -99,33 +82,30 @@ class TMDBAPI(ApiBase):
             "rating.tmdb",
             (
                 ("vote_average", "vote_count"),
-                lambda a, c: {"rating": control.safe_round(a, 2), "votes": c},
+                lambda a, c: {"rating": tools.safe_round(a, 2), "votes": c},
             ),
         ),
         ("tagline", "tagline", None),
+        ("status", "status", None),
         ("trailer", "trailer", None),
         ("belongs_to_collection", "set", lambda t: t.get("name") if t else None),
         (
             "production_companies",
             "studio",
-            lambda t: sorted(
-                OrderedDict.fromkeys(v["name"] if "name" in v else v for v in t)
-            ),
+            lambda t: sorted(set(v["name"] if "name" in v else v for v in t)),
         ),
         (
             "production_countries",
             "country",
-            lambda t: sorted(
-                OrderedDict.fromkeys(v["name"] if "name" in v else v for v in t)
-            ),
+            lambda t: sorted(set(v["name"] if "name" in v else v for v in t)),
         ),
         ("aliases", "aliases", None),
         ("mediatype", "mediatype", None),
     ]
 
-    show_normalization = control.extend_array(
+    show_normalization = tools.extend_array(
         [
-            ("name", ("tite", "tvshowtitle", "sorttitle"), None),
+            ("name", ("title", "tvshowtitle", "sorttitle"), None),
             ("original_name", "originaltitle", None),
             (
                 "first_air_date",
@@ -137,13 +117,13 @@ class TMDBAPI(ApiBase):
             (
                 "networks",
                 "studio",
-                lambda t: sorted(OrderedDict.fromkeys(v["name"] for v in t)),
+                lambda t: sorted(set(v["name"] for v in t)),
             ),
             (
                 ("credits", "crew"),
                 "director",
                 lambda t: sorted(
-                    OrderedDict.fromkeys(
+                    set(
                         v["name"] if "name" in v else v
                         for v in t
                         if v.get("job") == "Director"
@@ -154,7 +134,7 @@ class TMDBAPI(ApiBase):
                 ("credits", "crew"),
                 "writer",
                 lambda t: sorted(
-                    OrderedDict.fromkeys(
+                    set(
                         v["name"] if "name" in v else v
                         for v in t
                         if v.get("department") == "Writing"
@@ -171,7 +151,7 @@ class TMDBAPI(ApiBase):
         normalization,
     )
 
-    season_normalization = control.extend_array(
+    season_normalization = tools.extend_array(
         [
             ("name", ("title", "sorttitle"), None),
             ("season_number", ("season", "sortseason"), None),
@@ -180,7 +160,7 @@ class TMDBAPI(ApiBase):
                 ("credits", "crew"),
                 "director",
                 lambda t: sorted(
-                    OrderedDict.fromkeys(
+                    set(
                         v["name"] if "name" in v else v
                         for v in t
                         if v.get("job") == "Director"
@@ -191,7 +171,7 @@ class TMDBAPI(ApiBase):
                 ("credits", "crew"),
                 "writer",
                 lambda t: sorted(
-                    OrderedDict.fromkeys(
+                    set(
                         v["name"] if "name" in v else v
                         for v in t
                         if v.get("department") == "Writing"
@@ -203,7 +183,7 @@ class TMDBAPI(ApiBase):
         normalization,
     )
 
-    episode_normalization = control.extend_array(
+    episode_normalization = tools.extend_array(
         [
             ("name", ("title", "sorttitle"), None),
             ("episode_number", ("episode", "sortepisode"), None),
@@ -211,26 +191,18 @@ class TMDBAPI(ApiBase):
             (
                 "crew",
                 "director",
-                lambda t: sorted(
-                    OrderedDict.fromkeys(
-                        v["name"] for v in t if v.get("job") == "Director"
-                    )
-                ),
+                lambda t: sorted(set(v["name"] for v in t if v.get("job") == "Director")),
             ),
             (
                 "crew",
                 "writer",
-                lambda t: sorted(
-                    OrderedDict.fromkeys(
-                        v["name"] for v in t if v.get("department") == "Writing"
-                    )
-                ),
+                lambda t: sorted(set(v["name"] for v in t if v.get("department") == "Writing")),
             ),
         ],
         normalization,
     )
 
-    movie_normalization = control.extend_array(
+    movie_normalization = tools.extend_array(
         [
             ("title", ("title", "sorttitle"), None),
             ("original_title", "originaltitle", None),
@@ -257,6 +229,7 @@ class TMDBAPI(ApiBase):
         201: "Success - new resource created (POST)",
         401: "Invalid API key: You must be granted a valid key.",
         404: "The resource you requested could not be found.",
+        429: "Too Many Requests.",
         500: "Internal Server Error",
         501: "Not Implemented",
         502: "Bad Gateway",
@@ -277,14 +250,14 @@ class TMDBAPI(ApiBase):
     ]
 
     def __init__(self):
-        self.apiKey = g.get_setting("tmdb.apikey", "6974ec27debf5cce1218136e2a36f64b")
+        self.apiKey = g.get_setting("tmdb.apikey", "9f3ca569aa46b6fb13931ec96ab8ae7e")
         self.lang_code = g.get_language_code()
         self.lang_full_code = g.get_language_code(True)
         self.lang_region_code = self.lang_full_code.split("-")[1]
         if self.lang_region_code == "":
             self.lang_full_code = self.lang_full_code.strip("-")
-        self.include_languages = OrderedDict.fromkeys([self.lang_code, "en", "null"])
-        self.preferred_artwork_size = 1 #g.get_int_setting("artwork.preferredsize")
+        self.include_languages = [self.lang_code, "en", "null"] if not self.lang_code == "en" else ["en", "null"]
+        self.preferred_artwork_size = g.get_int_setting("artwork.preferredsize")
         self.artwork_size = {}
         self._set_artwork()
 
@@ -303,7 +276,9 @@ class TMDBAPI(ApiBase):
             ("stills", "fanart", None),
         ]
 
-        self.meta_hash = control.md5_hash(
+    @cached_property
+    def meta_hash(self):
+        return tools.md5_hash(
             (
                 self.lang_code,
                 self.lang_full_code,
@@ -316,21 +291,28 @@ class TMDBAPI(ApiBase):
             )
         )
 
-        self.session = requests.Session()
-        retries = Retry(total=5, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
-        self.session.mount("https://", HTTPAdapter(max_retries=retries))
-
-    def __del__(self):
-        self.session.close()
+    @cached_property
+    def session(self):
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3 import Retry
+        session = requests.Session()
+        retries = Retry(
+            total=5,
+            backoff_factor=0.1,
+            status_forcelist=[429, 500, 503, 504, 520, 521, 522, 524],
+        )
+        session.mount("https://", HTTPAdapter(max_retries=retries, pool_maxsize=100))
+        return session
 
     def _set_artwork(self):
         if self.preferred_artwork_size == 0:
-            self.artwork_size["fanart"] = 2160
-            self.artwork_size["poster"] = 780
-            self.artwork_size["keyart"] = 780
-            self.artwork_size["thumb"] = 780
-            self.artwork_size["icon"] = 780
-            self.artwork_size["cast"] = 780
+            self.artwork_size["fanart"] = "original"
+            self.artwork_size["poster"] = "original"
+            self.artwork_size["keyart"] = "original"
+            self.artwork_size["thumb"] = "original"
+            self.artwork_size["icon"] = "original"
+            self.artwork_size["cast"] = "original"
         elif self.preferred_artwork_size == 1:
             self.artwork_size["fanart"] = 1280
             self.artwork_size["poster"] = 500
@@ -350,7 +332,7 @@ class TMDBAPI(ApiBase):
     def get(self, url, **params):
         timeout = params.pop("timeout", 10)
         return self.session.get(
-            control.urljoin(self.baseUrl, url),
+            tools.urljoin(self.baseUrl, url),
             params=self._add_api_key(params),
             headers={"Accept": "application/json"},
             timeout=timeout,
@@ -369,13 +351,6 @@ class TMDBAPI(ApiBase):
             return None
         return self._handle_response(response.json())
 
-    @use_cache()
-    def get_merged_json_cached(self, url, **params):
-        response = self.get(url, **params)
-        if response is None:
-            return None
-        return response.json()
-
     @wrap_tmdb_object
     def get_movie(self, tmdb_id):
         return self.get_json_cached(
@@ -388,15 +363,15 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_movie_rating(self, tmdb_id):
-        result = control.filter_dictionary(
-            control.safe_dict_get(self.get_json_cached("movie/{}".format(tmdb_id)), "info"),
-            "rating",
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(self.get_json_cached("movie/{}".format(tmdb_id)), "info"),
+            "rating.tmdb",
         )
         return {"info": result} if result else None
 
     @wrap_tmdb_object
     def get_movie_cast(self, tmdb_id):
-        result = control.safe_dict_get(
+        result = tools.safe_dict_get(
             self.get_json_cached("movie/{}/credits".format(tmdb_id)), "cast"
         )
         return {"cast": result} if result else None
@@ -427,28 +402,18 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_show_rating(self, tmdb_id):
-        result = control.filter_dictionary(
-            control.safe_dict_get(self.get_json_cached("tv/{}".format(tmdb_id)), "info"),
-            "rating",
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(self.get_json_cached("tv/{}".format(tmdb_id)), "info"),
+            "rating.tmdb",
         )
         return {"info": result} if result else None
 
     @wrap_tmdb_object
     def get_show_cast(self, tmdb_id):
-        result = control.safe_dict_get(
+        result = tools.safe_dict_get(
             self.get_json_cached("tv/{}/credits".format(tmdb_id)), "cast"
         )
         return {"cast": result} if result else None
-
-    @wrap_tmdb_object
-    def get_anime_tmdb_id(self, item_information):
-        return self.get_merged_json_cached(
-            "tv/{}".format(37854),
-            language=self.lang_full_code,
-            append_to_response="season/1,season/2,season/3,season/4,season/5,season/6",
-            include_image_language=",".join(self.include_languages),
-            region=self.lang_region_code,
-        )
 
     @wrap_tmdb_object
     def get_season(self, tmdb_id, season):
@@ -478,16 +443,6 @@ class TMDBAPI(ApiBase):
         )
 
     @wrap_tmdb_object
-    def get_all_episodes(self, tmdb_id, season, episode):
-        return self.get_json_cached(
-            "tv/{}/season/{}/episode/{}".format(tmdb_id, season, episode),
-            language=self.lang_full_code,
-            append_to_response=",".join(self.append_to_response),
-            include_image_language=",".join(self.include_languages),
-            region=self.lang_region_code,
-        )
-
-    @wrap_tmdb_object
     def get_episode_art(self, tmdb_id, season, episode):
         return self.get_json_cached(
             "tv/{}/season/{}/episode/{}/images".format(tmdb_id, season, episode),
@@ -496,14 +451,14 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_episode_rating(self, tmdb_id, season, episode):
-        result = control.filter_dictionary(
-            control.safe_dict_get(
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(
                 self.get_json_cached(
                     "tv/{}/season/{}/episode/{}".format(tmdb_id, season, episode)
                 ),
                 "info",
             ),
-            "rating",
+            "rating.tmdb",
         )
         return {"info": result} if result else None
 
@@ -516,7 +471,7 @@ class TMDBAPI(ApiBase):
     def _handle_response(self, item):
         result = {}
         self._try_detect_type(item)
-        # self._apply_localized_alternative_titles(item)
+        self._apply_localized_alternative_titles(item)
         self._apply_releases(item)
         self._apply_content_ratings(item)
         self._apply_release_dates(item)
@@ -567,7 +522,7 @@ class TMDBAPI(ApiBase):
                 and t["type"] == "Trailer"
             ):
                 if t.get("key"):
-                    item.update({"trailer": control.youtube_url.format(t["key"])})
+                    item.update({"trailer": tools.youtube_url.format(t["key"])})
                     return True
         return False
 
@@ -691,12 +646,7 @@ class TMDBAPI(ApiBase):
                             if i["iso_639_1"] != "xx"
                             else None,
                             "rating": self._normalize_rating(i),
-                            "size": int(
-                                i["width" if tmdb_type != "posters" else "height"]
-                            )
-                            if int(i["width" if tmdb_type != "posters" else "height"])
-                            < self.artwork_size[kodi_type]
-                            else self.artwork_size[kodi_type],
+                            "size": self._extract_size(tmdb_type, kodi_type, i),
                         }
                         for i in images[tmdb_type]
                         if selector is None or selector(i)
@@ -705,9 +655,20 @@ class TMDBAPI(ApiBase):
             )
         return result
 
+    def _extract_size(self, tmdb_type, kodi_type, item):
+        size = int(item["width" if tmdb_type != "posters" else "height"])
+
+        if (
+            self.artwork_size[kodi_type] == "original"
+            or size < self.artwork_size[kodi_type]
+        ):
+            return size
+        else:
+            return self.artwork_size[kodi_type]
+
     @staticmethod
     def _create_tmdb_image_size(size):
-        if size == 2160 or size == 1080:
+        if size == "original":
             return "original"
         else:
             return "w{}".format(size)
@@ -728,7 +689,7 @@ class TMDBAPI(ApiBase):
                 ),
             }
             for idx, item in enumerate(
-                control.extend_array(
+                tools.extend_array(
                     sorted(cast.get("cast", []), key=lambda k: k["order"],),
                     sorted(cast.get("guest_stars", []), key=lambda k: k["order"]),
                 )
@@ -744,211 +705,9 @@ class TMDBAPI(ApiBase):
             return rating
         return 5
 
-    def _get_absolute_image_path(self, relative_path, size="orginal"):
+    def _get_absolute_image_path(self, relative_path, size="original"):
         if not relative_path:
             return None
         return "/".join(
             [self.imageBaseUrl.strip("/"), size.strip("/"), relative_path.strip("/")]
         )
-# # -*- coding: utf-8 -*-
-# from future import standard_library
-# standard_library.install_aliases()
-# from builtins import str
-# from builtins import object
-# import requests
-# import json
-# import copy
-# import threading
-
-# class TMDBAPI(object):
-#     def __init__(self):
-#         self.apiKey = "6974ec27debf5cce1218136e2a36f64b"
-#         self.baseUrl = "https://api.themoviedb.org/3/"
-#         self.posterPath = "https://image.tmdb.org/t/p/w500"
-#         self.thumbPath = "https://image.tmdb.org/t/p/w500"
-#         self.backgroundPath = "https://image.tmdb.org/t/p/w1280"
-#         self.art = {}
-#         self.request_response = None
-#         self.threads = []
-
-#     def get_request(self, url):
-#         try:
-#             if '?' not in url:
-#                 url += "?"
-#             else:
-#                 url += "&"
-
-#             if 'api_key' not in url:
-#                 url += "api_key=%s" % self.apiKey
-#                 url = self.baseUrl + url
-
-#             try:
-#                 try:
-#                     response = requests.get(url)
-#                 except requests.exceptions.SSLError:
-#                     response = requests.get(url, verify=False)
-#             except requests.exceptions.ConnectionError:
-#                 return
-
-#             if '200' in str(response):
-#                 response = json.loads(response.text)
-#                 self.request_response = response
-#                 return response
-#             # This code is now deprecated as the throttling has been removed,
-#             # We will leave it here though in case they decide to use it later
-#             # elif 'Retry-After' in response.headers:
-#             #     # API REQUESTS ARE BEING THROTTLED, INTRODUCE WAIT TIME
-#             #     throttleTime = response.headers['Retry-After']
-#             #     control.log('TMDB Throttling Applied, Sleeping for %s seconds' % throttleTime, '')
-#             #     sleep(int(throttleTime) + 1)
-#             #     return self.get_request(url)
-#             else:
-#                 return None
-#         except:
-#             import traceback
-#             traceback.print_exc()
-
-#     def get_TMDB_Fanart_Threaded(self, tmdb_url, fanart_args):
-
-#         self.threads.append(threading.Thread(target=self.get_request, args=(tmdb_url,)))
-
-#         for thread in self.threads:
-#             thread.start()
-
-#         for thread in self.threads:
-#             thread.join()
-
-#     def showFanart(self, traktItem):
-
-#         try:
-#             if traktItem['tmdb'] is None:
-#                 return None
-
-#             url = 'tv/%s?&append_to_response=credits,alternative_titles,videos,content_ratings,images&language=en-US' % \
-#                   traktItem['tmdb']
-
-#             self.get_TMDB_Fanart_Threaded(url, (traktItem['tvdb'], 'tv'))
-
-#             details = self.request_response
-
-#             if details is None:
-#                 return details
-
-#             try:
-#                 self.art['fanart'] = self.backgroundPath + str(details.get('backdrop_path', ''))
-#             except:
-#                 pass
-
-#             item = self.art
-
-#         except:
-#             import traceback
-#             traceback.print_exc()
-#             return None
-
-#         return item
-
-#     def showPoster(self, traktItem):
-
-#         try:
-#             if traktItem['tmdb'] is None:
-#                 return None
-
-#             url = 'tv/%s?&append_to_response=credits,alternative_titles,videos,content_ratings,images&language=en-US' % \
-#                   traktItem['tmdb']
-
-#             self.get_TMDB_Fanart_Threaded(url, (traktItem['tvdb'], 'tv'))
-
-#             details = self.request_response
-
-#             if details is None:
-#                 return details
-
-#             try:
-#                 self.art['poster'] = self.posterPath + str(details.get('poster_path', ''))
-#             except:
-#                 pass
-
-#             item = self.art
-
-#         except:
-#             import traceback
-#             traceback.print_exc()
-#             return None
-
-#         return item 
-
-#     def showSeasonToListItem(self, seasonObject=None, showArgs=None):
-
-#         try:
-#             url = 'tv/%s/season/%s?&append_to_response=credits,videos,images&language=en-US' % (
-#                 str(showArgs['tmdb']), str(seasonObject))
-
-#             self.get_TMDB_Fanart_Threaded(url, (83121, 'season'))
-
-#             details = self.request_response
-
-#             if details is None:
-#                 return None
-
-#             try:
-#                 self.art['poster'] = self.posterPath + str(details.get('poster_path', ''))
-#                 self.art['thumb'] = self.posterPath + str(details.get('poster_path', ''))
-#             except:
-#                 pass
-
-#             item = self.art
-
-#         except:
-#             import traceback
-#             traceback.print_exc()
-#             return None
-
-#         return item
-
-#     def episodeIDToListItem(self, season=None, number=None, showArgs=None):
-#         try:
-#             if showArgs['tmdb'] is None:
-#                 return None
-
-#             url = 'tv/%s/season/%s/episode/%s?&append_to_response=credits,videos,images&language=en-US' % (
-#                 showArgs['tmdb'],
-#                 season,
-#                 number)
-#             response = self.get_request(url)
-
-#             if response.get('status_code') == 34:
-#                 return None
-
-#             try:
-#                 self.art['landscape'] = self.backgroundPath + response.get('still_path', '')
-#                 self.art['thumb'] = self.thumbPath + response.get('still_path', '')
-#             except:
-#                 pass
-
-#             item = self.art
-
-#             return item
-#         except:
-#             return None
-
-
-#     def parseEpisodeInfo(self, response, traktInfo, showArgs):
-#         try:
-#             if "status_code" in response:
-#                 if response["status_code"] == 34: return None
-
-#             art = {}
-
-#             try:
-#                 art['landscape'] = self.backgroundPath + response.get('still_path', '')
-#                 art['thumb'] = self.thumbPath + response.get('still_path', '')
-#             except:
-#                 pass
-
-#         except:
-#             import traceback
-#             traceback.print_exc()
-#             return None
-
-#         return art

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <window>
-	<defaultcontrol always="true">3001</defaultcontrol>
+	<defaultcontrol always="true">3004</defaultcontrol>
 	<onload>Dialog.Close(fullscreeninfo,true)</onload>
 	<onload>Dialog.Close(videoosd,true)</onload>
 	<controls>
@@ -33,7 +33,7 @@
 						<left>0</left>
 						<itemgap>10</itemgap>
 						<width>100%</width>
-						<control type="button" id="3001">
+						<control type="button" id="3004">
 							<label>Skip Intro</label>
 							<height>56</height>
 							<width min="50">auto</width>

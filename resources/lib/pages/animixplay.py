@@ -4,17 +4,12 @@ from builtins import map
 from builtins import range
 import json
 import bs4 as bs
-import re
 import itertools
 from functools import partial
-from ..ui import utils, source_utils
-from ..ui.BrowserBase import BrowserBase
-from ..debrid import real_debrid, all_debrid
-from ..ui import database
+from ..common import source_utils
+from ..modules.BrowserBase import BrowserBase
+from ..modules import database
 import requests
-import threading
-
-import copy
 
 class sources(BrowserBase):
     def get_sources(self, anilist_id, episode, get_backup):

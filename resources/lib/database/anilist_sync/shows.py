@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, division, unicode_literals
 
+from resources.lib.common.thread_pool import ThreadPool
 from resources.lib.database import anilist_sync
-from resources.lib.ui import database
-from resources.lib.ui.globals import g
-from resources.lib.ui.thread_pool import ThreadPool
+from resources.lib.modules import kaito_database as database
+from resources.lib.modules.globals import g
 from resources.lib.modules.guard_decorators import (
     guard_against_none,
     guard_against_none_or_empty,
@@ -313,7 +313,7 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
         statement += " order by s.Season"
         return self.fetchall(statement)
 
-    @guard_against_none(list, 1, 2, 4)
+    @guard_against_none(list, 1, 2, 3, 4)
     def get_episode_list(
         self,
         anilist_id,
@@ -340,15 +340,18 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
         :return: List of episode objects with full meta
         :rtype: list
         """
+        import time
+        t0 = time.time()
         g.log("Fetching Episode list from sync database", "debug")
         self._try_update_episodes(anilist_id, trakt_show_id, trakt_season_id, trakt_id)
         g.log("Updated required episodes", "debug")
-        statement = """SELECT e.trakt_id, e.info, e.cast, e.art, e.args, e.watched as play_count FROM episodes as e WHERE """
-
+        statement = """SELECT e.anilist_id, e.trakt_id, e.trakt_show_id, e.info, e.cast, e.art, e.args, e.watched as play_count FROM episodes as e WHERE """
+        t1 = time.time()
+        g.log("Update Episode time: " + str(t1-t0))
         if trakt_season_id is not None:
             statement += "e.trakt_season_id = {} ".format(trakt_season_id)
         elif trakt_id is not None:
-            statement += "e.trakt_id = {} ".format(trakt_id)
+            statement += "e.trakt_show_id = {} ".format(trakt_id)
         else:
             statement += "e.anilist_id = {} ".format(anilist_id)
         if params.pop("hide_unaired", False):
@@ -357,9 +360,13 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
         #     statement += " AND e.season != 0"
         # if params.pop("hide_watched", self.hide_watched):
         #     statement += " AND e.watched = 0"
-        if minimum_episode:
+        if params.pop("single_item_only", False):
+            statement += " AND e.number = {}".format(int(minimum_episode))
+        elif minimum_episode:
             statement += " AND e.number >= {}".format(int(minimum_episode))
         statement += " order by e.season, e.number"
+        g.log("Fetch Query: " + statement)
+        g.log("Fetch time: " + str(time.time() - t1))
         return self.fetchall(statement)
 
     @guard_against_none(list, 1, 2, 4)
@@ -495,31 +502,18 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
     #     """
     #     return self.get_season_list(trakt_show_id, trakt_id)[0]
 
-    # @guard_against_none(list)
-    # def get_episode(self, trakt_id, trakt_show_id):
-    #     """
-    #     Returns a single episode record from the database with full meta
-    #     :param trakt_id: Trakt ID of episode
-    #     :type trakt_id: int
-    #     :param trakt_show_id: Trakt ID of show
-    #     :type trakt_show_id: int
-    #     :return: Episode object with full meta
-    #     :rtype: dict
-    #     """
-    #     result = self.get_episode_list(trakt_show_id, trakt_id=trakt_id)[0]
-    #     result.update(
-    #         self.fetchone(
-    #             """select s.season_count, s.episode_count as show_episode_count, 
-    #     se.episode_count, se.is_airing, a.absoluteNumber from episodes as e INNER JOIN seasons as se on se.trakt_id = 
-    #     e.trakt_season_id INNER JOIN shows as s on s.trakt_id = e.trakt_show_id INNER JOIN 
-    #     (select e.trakt_show_id, count(distinct e.trakt_id) as absoluteNumber from episodes as e inner join 
-    #     (select e.trakt_show_id, (e.season*10 + e.number) as identifier from episodes as e where e.trakt_id = ?) as 
-    #     agg on agg.trakt_show_id = e.trakt_show_id and agg.identifier >= (e.season*10 + number) group by 
-    #     e.trakt_show_id) as a on a.trakt_show_id = e.trakt_show_id WHERE e.trakt_id = ?""",
-    #             (trakt_id, trakt_id),
-    #         )
-    #     )
-    #     return result
+    def get_episode(self, anilist_id, episode, season=None):
+        """
+        Returns a single episode record from the database with full meta
+        :param trakt_id: Trakt ID of episode
+        :type trakt_id: int
+        :param trakt_show_id: Trakt ID of show
+        :type trakt_show_id: int
+        :return: Episode object with full meta
+        :rtype: dict
+        """
+        result = self.get_episode_list(anilist_id, None, season, None, episode)[0]
+        return result
 
     def _repair_missing_trakt_items(self, list_to_update, media_type):
         trakt_object = MetadataHandler.anilist_object
@@ -552,43 +546,58 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
             return
 
         updated_items = [i for i in updated_items if i is not None]
+        provider_list = ["trakt_object", "tmdb_object", "tvdb_object", "fanart_object", "omdb_object"]
 
-        self.save_to_meta_table(
+        for j in updated_items:
+            for i in provider_list:
+                if i in j:
+                    if j.get(i) is not None:
+                        if j[i].get("info") is not None and j["anilist_object"] is not None:
+                            j[i]["info"]["aliases"] = j["anilist_object"]["info"]["aliases"]
+
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "anilist_object" in i),
             media_type,
             "anilist",
             "anilist_id",
         )
-        self.save_to_meta_table(
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "trakt_object" in i),
             media_type,
             "trakt",
             "trakt_id",
         )
-        self.save_to_meta_table(
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "tmdb_object" in i),
             media_type,
             "tmdb",
             "tmdb_id",
         )
-        self.save_to_meta_table(
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "tvdb_object" in i),
             media_type,
             "tvdb",
             "tvdb_id",
         )
-        self.save_to_meta_table(
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "fanart_object" in i),
             media_type,
             "fanart",
             "tvdb_id",
         )
-        self.save_to_meta_table(
+        threadpool.put(
+            self.save_to_meta_table,
             (i for i in updated_items if "omdb_object" in i),
             media_type,
             "omdb",
             "imdb_id",
         )
+        threadpool.wait_completion()
 
         return updated_items
 
@@ -660,9 +669,16 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
         if not trakt_list:
             return
         trakt_list = trakt_list if isinstance(trakt_list, list) else [trakt_list]
+        import time
+        t0 = time.time()
         self.insert_anilist_shows(trakt_list)
+        t1 = time.time()
+        g.log("Insert Show time: " + str(t1-t0))
         self._update_shows(trakt_list)
+        t2 = time.time()
+        g.log("Update shows time: " + str(t2-t1))
         self._mill_if_needed(trakt_list, None, mill_episodes)
+        g.log("mill if needed time: " + str(time.time()-t2))
 
     def _update_alt_mill_format_shows(self, trakt_list, mill_episodes=False):
         if not trakt_list:
@@ -898,8 +914,8 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
             ),
         )
 
-
-        episodes_watched = database.get_show(anilist_id)["watched_episodes"]
+        from resources.lib.common import tools
+        episodes_watched = tools.get_item_information(anilist_id)["watched_episodes"]
         if episodes_watched > 0:
             database.mark_episodes_watched(anilist_id, 1, 1, episodes_watched)
 
@@ -923,8 +939,14 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
 
     @guard_against_none(None, 1, 2, 3)
     def _try_update_episodes(self, anilist_id, trakt_show_id, trakt_season_id=None, trakt_id=None):
+        import time
+        t0 = time.time()
         show_meta = self._get_single_show_meta(anilist_id)
+        t1 = time.time()
+        g.log("Update Single Show Meta Time: " + str(t1-t0))
         self._update_mill_format_shows(show_meta, True)
+        t2 = time.time()
+        g.log("Update Mill Format Shows Time: " + str(t2-t1))
         query = """SELECT value as trakt_object, e.anilist_id, e.trakt_id, e.trakt_show_id, sh.tmdb_id as tmdb_show_id, sh.tvdb_id 
         as tvdb_show_id, sh.simkl_id as simkl_show_id FROM episodes as e INNER JOIN shows as sh on e.trakt_show_id = sh.trakt_id 
         INNER JOIN episodes_meta as m on m.id = e.trakt_id and m.type='trakt' where """
@@ -937,9 +959,13 @@ class AnilistSyncDatabase(anilist_sync.AnilistSyncDatabase):
             query += "sh.anilist_id = {}".format(anilist_id)
 
         episodes_to_update = self.fetchall(query)
-
+        t3 = time.time()
+        g.log("episode to update fetch time : " + str(t3-t2))
         self._update_episodes(episodes_to_update)
+        t4 = time.time()
+        g.log("update episodes time: " + str(t4-t3))
         self._format_episodes(episodes_to_update)
+        g.log("Format episodes time: " + str(time.time()-t4))
 
     @guard_against_none(None, 1, 2, 3)
     def _try_alt_update_episodes(self, anilist_id, trakt_show_id, trakt_season_id=None, trakt_id=None):

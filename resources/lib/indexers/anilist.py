@@ -2,20 +2,14 @@
 from __future__ import absolute_import
 from builtins import map
 from builtins import str
-from builtins import object
 import requests
-import json
-import ast
-from functools import partial
 from datetime import datetime
-from .tmdb import TMDBAPI
-from ..ui import database
-from resources.lib.ui import control
+from resources.lib.common import tools
 from resources.lib.indexers.apibase import (
     ApiBase,
     handle_single_item_or_list,
 )
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from resources.lib.database.cache import use_cache
 
 class AnilistAPI(ApiBase):
@@ -28,7 +22,7 @@ class AnilistAPI(ApiBase):
     def __init__(self):
         self.title_language = self._get_title_language()
         self.get_hasNextPage = ('data', 'Page', 'pageInfo', 'hasNextPage')
-        self.meta_hash = control.md5_hash((self.title_language, self._URL))
+        self.meta_hash = tools.md5_hash((self.title_language, self._URL))
 
         self.query = {
             'anime/id': self.anime_id_query,
@@ -49,7 +43,7 @@ class AnilistAPI(ApiBase):
             ("description", ("plot", "plotoutline"), None),
         ]
 
-        self.Normalization = control.extend_array(
+        self.Normalization = tools.extend_array(
             [
                 ("genres", "genre", None),
                 ("id", "anilist_id", None),
@@ -68,7 +62,7 @@ class AnilistAPI(ApiBase):
             self.TranslationNormalization,
         )
 
-        self.MoviesNormalization = control.extend_array(
+        self.MoviesNormalization = tools.extend_array(
             [
                 ("episodes", "episode_count", None),
                 (("startDate", "year"), "year", None),
@@ -81,7 +75,7 @@ class AnilistAPI(ApiBase):
             self.Normalization,
         )
 
-        self.ShowNormalization = control.extend_array(
+        self.ShowNormalization = tools.extend_array(
             [
                 ("status", "status", None),
                 ("status", "is_airing", lambda t: not t in {'FINISHED', 'NOT_YET_RELEASED'}),
@@ -101,7 +95,7 @@ class AnilistAPI(ApiBase):
             self.Normalization,
         )
 
-        self.SeasonNormalization = control.extend_array(
+        self.SeasonNormalization = tools.extend_array(
             [
                 ("number", ("season", "sortseason"), None),
                 ("episode_count", "episode_count", None),
@@ -109,20 +103,20 @@ class AnilistAPI(ApiBase):
                 (
                     "first_aired",
                     "year",
-                    lambda t: control.validate_date(t)[:4]
-                    if control.validate_date(t)
+                    lambda t: tools.validate_date(t)[:4]
+                    if tools.validate_date(t)
                     else None
                 ),
                 (
                     "first_aired",
                     ("premiered", "aired"),
-                    lambda t: control.validate_date(t),
+                    lambda t: tools.validate_date(t),
                 ),
             ],
             self.Normalization,
         )
 
-        self.EpisodeNormalization = control.extend_array(
+        self.EpisodeNormalization = tools.extend_array(
             [
                 ("number", ("episode", "sortepisode"), None),
                 ("season", ("season", "sortseason"), None),
@@ -131,14 +125,14 @@ class AnilistAPI(ApiBase):
                 (
                     "first_aired",
                     "year",
-                    lambda t: control.validate_date(t)[:4]
-                    if control.validate_date(t)
+                    lambda t: tools.validate_date(t)[:4]
+                    if tools.validate_date(t)
                     else None
                 ),
                 (
                     "first_aired",
                     ("premiered", "aired"),
-                    lambda t: control.validate_date(t),
+                    lambda t: tools.validate_date(t),
                 ),
             ],
             self.Normalization,
@@ -151,7 +145,7 @@ class AnilistAPI(ApiBase):
         ]
 
         self.ListNormalization = [
-            ("updated_at", "dateadded", lambda t: control.validate_date(t)),
+            ("updated_at", "dateadded", lambda t: tools.validate_date(t)),
             (("ids", "trakt"), "trakt_id", None),
             (("ids", "slug"), "slug", None),
             ("sort_by", "sort_by", None),
@@ -207,7 +201,6 @@ class AnilistAPI(ApiBase):
         :param params: URL params for request
         :return: JSON response
         """
-
         get_dict = params.pop('dict_key')
         query_path = params.pop('query_path')
         if query_path:
@@ -510,7 +503,7 @@ class AnilistAPI_animelist(ApiBase):
     def __init__(self):
         self.title_language = self._get_title_language()
         self.get_hasNextPage = ('data', 'Page', 'pageInfo', 'hasNextPage')
-        self.meta_hash = control.md5_hash((self.title_language, self._URL))
+        self.meta_hash = tools.md5_hash((self.title_language, self._URL))
 
         self.query = {
             'animelist/status': self.animelist_status_query,
@@ -526,7 +519,7 @@ class AnilistAPI_animelist(ApiBase):
             ("description", ("plot", "plotoutline"), None),
         ]
 
-        self.Normalization = control.extend_array(
+        self.Normalization = tools.extend_array(
             [
                 ("genres", "genre", None),
                 ("id", "anilist_id", None),
@@ -545,7 +538,7 @@ class AnilistAPI_animelist(ApiBase):
             self.TranslationNormalization,
         )
 
-        self.MoviesNormalization = control.extend_array(
+        self.MoviesNormalization = tools.extend_array(
             [
                 ("episodes", "episode_count", None),
                 (("startDate", "year"), "year", None),
@@ -558,7 +551,7 @@ class AnilistAPI_animelist(ApiBase):
             self.Normalization,
         )
 
-        self.ShowNormalization = control.extend_array(
+        self.ShowNormalization = tools.extend_array(
             [
                 ("status", "status", None),
                 ("status", "is_airing", lambda t: not t in {'FINISHED', 'NOT_YET_RELEASED'}),
@@ -579,7 +572,7 @@ class AnilistAPI_animelist(ApiBase):
             self.Normalization,
         )
 
-        self.SeasonNormalization = control.extend_array(
+        self.SeasonNormalization = tools.extend_array(
             [
                 ("number", ("season", "sortseason"), None),
                 ("episode_count", "episode_count", None),
@@ -587,20 +580,20 @@ class AnilistAPI_animelist(ApiBase):
                 (
                     "first_aired",
                     "year",
-                    lambda t: control.validate_date(t)[:4]
-                    if control.validate_date(t)
+                    lambda t: tools.validate_date(t)[:4]
+                    if tools.validate_date(t)
                     else None
                 ),
                 (
                     "first_aired",
                     ("premiered", "aired"),
-                    lambda t: control.validate_date(t),
+                    lambda t: tools.validate_date(t),
                 ),
             ],
             self.Normalization,
         )
 
-        self.EpisodeNormalization = control.extend_array(
+        self.EpisodeNormalization = tools.extend_array(
             [
                 ("number", ("episode", "sortepisode"), None),
                 ("season", ("season", "sortseason"), None),
@@ -609,14 +602,14 @@ class AnilistAPI_animelist(ApiBase):
                 (
                     "first_aired",
                     "year",
-                    lambda t: control.validate_date(t)[:4]
-                    if control.validate_date(t)
+                    lambda t: tools.validate_date(t)[:4]
+                    if tools.validate_date(t)
                     else None
                 ),
                 (
                     "first_aired",
                     ("premiered", "aired"),
-                    lambda t: control.validate_date(t),
+                    lambda t: tools.validate_date(t),
                 ),
             ],
             self.Normalization,
@@ -629,7 +622,7 @@ class AnilistAPI_animelist(ApiBase):
         ]
 
         self.ListNormalization = [
-            ("updated_at", "dateadded", lambda t: control.validate_date(t)),
+            ("updated_at", "dateadded", lambda t: tools.validate_date(t)),
             (("ids", "trakt"), "trakt_id", None),
             (("ids", "slug"), "slug", None),
             ("sort_by", "sort_by", None),
@@ -838,7 +831,9 @@ class AnilistAPI_animelist(ApiBase):
         return result
 
     def _get_title(self, item):
-        title = item.get(self.title_language, item.get('userPreferred'))
+        title = item.get(self.title_language)
+        if not title:
+            title = item.get('userPreferred')
         title = title.encode('ascii','ignore').decode("utf-8")
         return title
 

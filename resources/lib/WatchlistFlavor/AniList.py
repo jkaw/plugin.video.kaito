@@ -3,10 +3,7 @@ from __future__ import absolute_import
 from builtins import str
 from builtins import map
 import itertools
-import json
-import ast
-from ..ui import database
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from .WatchlistFlavorBase import WatchlistFlavorBase
 
 class AniListWLF(WatchlistFlavorBase):
@@ -62,7 +59,7 @@ class AniListWLF(WatchlistFlavorBase):
                 action='watchlist_status_type',
                 action_args={"flavor": "anilist", "status": status}
             )
-        g.close_directory(g.CONTENT_FOLDER)
+        g.close_directory(g.CONTENT_MENU)
         # all_results = list(map(self._base_watchlist_view, self.__anilist_statuses()))
         # all_results = list(itertools.chain(*all_results))
         # return all_results

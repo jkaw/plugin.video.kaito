@@ -9,22 +9,19 @@ import time
 
 import xbmcgui
 
-from resources.lib.ui import control
-from resources.lib.ui import database
-from resources.lib.modules.thread_pool import ThreadPool
+from resources.lib.common import tools
+from resources.lib.modules import kaito_database as database
+from resources.lib.common.thread_pool import ThreadPool
+from resources.lib.common.tools import cached_property
 from resources.lib.database import Database
-from resources.lib.indexers.anilist import AnilistAPI, AnilistAPI_animelist
-from resources.lib.indexers.trakt import TraktAPI2
-from resources.lib.ui.exceptions import (
+from resources.lib.modules.exceptions import (
     UnsupportedProviderType,
     InvalidMediaTypeException,
 )
-from resources.lib.ui.globals import g
-from resources.lib.ui.global_lock import GlobalLock
+from resources.lib.modules.globals import g
+from resources.lib.modules.global_lock import GlobalLock
 from resources.lib.modules.metadataHandler import MetadataHandler
 from resources.lib.modules.sync_lock import SyncLock
-
-migrate_db_lock = threading.Lock()
 
 schema = {
     "shows_meta": {
@@ -165,6 +162,16 @@ schema = {
             "FOREIGN KEY(trakt_season_id) REFERENCES seasons(trakt_id) DEFERRABLE INITIALLY DEFERRED",
             "FOREIGN KEY(anilist_id) REFERENCES shows(anilist_id) DEFERRABLE INITIALLY DEFERRED"
         ],
+        "indices": [
+            ("idx_episodes_seasonid_season_number", ["anilist_id", "season", "number"]),
+            ("idx_episodes_seasonid_season_number_trakt", ["trakt_show_id", "season", "number"]),
+            ("idx_episodes_showid_season_number_lastwatched", ["trakt_show_id", "season", "number", "last_watched_at"]),
+            ("idx_episodes_showid_season_number_lastwatched_anilist", ["anilist_id", "season", "number", "last_watched_at"]),
+            ("idx_episodes_showid_season_number_anilist", ["anilist_id", "season", "number", "last_watched_at"]),
+            ("idx_episodes_anilist", ["anilist_id", "number"]),
+            ("idx_episodes_trakt", ["trakt_show_id", "number"]),
+            ("idx_episodes_collected", ["collected"])
+        ],
         "default_seed": [],
     },
 }
@@ -173,10 +180,6 @@ schema = {
 class AnilistSyncDatabase(Database):
     def __init__(self,):
         super(AnilistSyncDatabase, self).__init__(g.ANILIST_SYNC_DB_PATH, schema)
-        self.metadataHandler = MetadataHandler()
-        self.trakt_api = AnilistAPI()
-        self.anilist_animelist = AnilistAPI_animelist()
-        self.trakt_api2 = TraktAPI2()
 
     #     self.activities = {}
     #     self.item_list = []
@@ -204,6 +207,26 @@ class AnilistSyncDatabase(Database):
     #     self.hide_watched = g.get_bool_setting("general.hideWatched")
     #     self.date_delay = g.get_bool_setting("general.datedelay")
     #     self.page_limit = g.get_int_setting("item.limit")
+
+    @cached_property
+    def metadataHandler(self):
+        from resources.lib.modules.metadataHandler import MetadataHandler
+        return MetadataHandler()
+
+    @cached_property
+    def trakt_api(self):
+        from resources.lib.indexers.anilist import AnilistAPI
+        return AnilistAPI()
+
+    @cached_property
+    def trakt_api2(self):
+        from resources.lib.indexers.trakt import TraktAPI2
+        return TraktAPI2()
+
+    @cached_property
+    def anilist_animelist(self):
+        from resources.lib.indexers.anilist import AnilistAPI_animelist
+        return AnilistAPI_animelist()
 
     # def clear_specific_item_meta(self, trakt_id, media_type):
     #     if media_type == "tvshow":
@@ -247,7 +270,7 @@ class AnilistSyncDatabase(Database):
 
     # def set_base_activities(self):
     #     self.execute_sql(
-    #         "INSERT OR REPLACE INTO activities(sync_id, seren_version, trakt_username) VALUES(1, ?, ?)",
+    #         "INSERT OR REPLACE INTO activities(sync_id, kaito_version, trakt_username) VALUES(1, ?, ?)",
     #         (self.last_meta_update, g.get_setting("trakt.username")),
     #     )
     #     self.activities = self.fetchone(
@@ -258,7 +281,7 @@ class AnilistSyncDatabase(Database):
     #     # If we are updating from a database prior to database versioning, we must clear the meta data
     #     # Migrate from older versions before trakt username tracking
     #     if tools.compare_version_numbers(
-    #         self.activities["seren_version"], self.last_meta_update
+    #         self.activities["kaito_version"], self.last_meta_update
     #     ):
     #         g.log("Rebuilding Trakt Sync Database Version")
     #         xbmcgui.Dialog().ok(g.ADDON_NAME, g.get_language_string(30363))
@@ -413,18 +436,19 @@ class AnilistSyncDatabase(Database):
         if obj is None or meta_hash is None:
             raise UnsupportedProviderType(provider_type)
 
-        with GlobalLock("save_to_meta_table", check_sum=meta_type):
-            self.execute_sql(
-                sql_statement,
-                (
-                    (i.get(id_column), provider_type, meta_hash, self.clean_meta(obj(i)))
-                    for i in items
-                    if i
-                       and obj(i)
-                       and i.get(id_column)
-                       and MetadataHandler.full_meta_up_to_par(meta_type, obj(i))
-                ),
+        self.execute_sql(
+            sql_statement,
+            (
+                (i.get(id_column), provider_type, meta_hash, self.clean_meta(obj(i)))
+                for i in items
+                if (
+                    i
+                    and obj(i)
+                    and i.get(id_column)
+                    and MetadataHandler.full_meta_up_to_par(meta_type, obj(i))
             )
+            ),
+        )
 
         for i in items:
             if i and obj(i):
@@ -520,8 +544,8 @@ class AnilistSyncDatabase(Database):
                     MetadataHandler.anilist_info(i),
                     MetadataHandler.anilist_art(i),
                     None,
-                    control.validate_date(get(i, "aired")),
-                    control.validate_date(get(i, "dateadded")),
+                    tools.validate_date(get(i, "aired")),
+                    tools.validate_date(get(i, "dateadded")),
                     self.trakt_api.meta_hash,
                     None,
                     get(i, "episode_count"),
@@ -579,7 +603,7 @@ class AnilistSyncDatabase(Database):
                     None,
                     None,
                     None,
-                    self._create_args(i),
+                    self._create_args(i['trakt_object']),
                     g.validate_date(get(i, "last_watched_at")),
                     g.validate_date(get(i, "collected_at")),
                     self.trakt_api.meta_hash,
@@ -618,8 +642,8 @@ class AnilistSyncDatabase(Database):
                     None,
                     None,
                     None,
-                    control.validate_date(get(i, "aired")),
-                    control.validate_date(get(i, "dateadded")),
+                    tools.validate_date(get(i, "aired")),
+                    tools.validate_date(get(i, "dateadded")),
                     get(i, "tmdb_id"),
                     get(i, "tvdb_id"),
                     self.trakt_api.meta_hash,
@@ -694,7 +718,7 @@ class AnilistSyncDatabase(Database):
 
                 # for show in trakt_collection:
                 #     extended_seasons = {get(x, "season"): x for x in get(show, "seasons", [])}
-                #     item_information = control.get_item_information(show.get("anilist_id"))
+                #     item_information = tools.get_item_information(show.get("anilist_id"))
                 #     anilist_id = show.get("anilist_id")
                 #     trakt_id_ = item_information['trakt_id']
                 #     aired_year = item_information['air_date'].split('-')[0]
@@ -720,7 +744,7 @@ class AnilistSyncDatabase(Database):
                 #         }
                 #         extended_episode = extended_episodes.get(get(episode, "episode"))
                 #         if extended_episode:
-                #             control.smart_merge_dictionary(episode, extended_episode, keep_original=True)
+                #             tools.smart_merge_dictionary(episode, extended_episode, keep_original=True)
 
                 #         episodes.append(episode)
                 
@@ -796,17 +820,22 @@ class AnilistSyncDatabase(Database):
             # the other process/thread is done with its milling giving good results.
             if len(sync_lock.running_ids) > 0:
                 get = MetadataHandler.get_trakt_info
+                trakt_info = MetadataHandler.trakt_info
+
                 queue_wrapper(
                     self._pull_show_seasons, [(i, mill_episodes) for i in sync_lock.running_ids]
                 )
                 results = self.mill_task_queue.wait_completion()
+
                 seasons = []
                 episodes = []
-                trakt_info = MetadataHandler.trakt_info
+
+                season_ids = {}
+                episode_ids = {}
 
                 for show in trakt_collection:
                     extended_seasons = {get(x, "season"): x for x in get(show, "seasons", [])}
-                    item_information = control.get_item_information(show.get("anilist_id"))
+                    item_information = tools.get_item_information(show.get("anilist_id"))
                     anilist_id = show.get("anilist_id")
                     trakt_id_ = item_information['trakt_id']
                     aired_year = item_information['air_date'].split('-')[0]
@@ -863,7 +892,7 @@ class AnilistSyncDatabase(Database):
 
                         extended_season = extended_seasons.get(get(season, "season"))
                         if extended_season:
-                            control.smart_merge_dictionary(season, extended_season, keep_original=True)
+                            tools.smart_merge_dictionary(season, extended_season, keep_original=True)
 
                         seasons.append(season)
 
@@ -887,7 +916,7 @@ class AnilistSyncDatabase(Database):
                             }
                             extended_episode = extended_episodes.get(get(episode, "episode"))
                             if extended_episode:
-                                control.smart_merge_dictionary(episode, extended_episode, keep_original=True)
+                                tools.smart_merge_dictionary(episode, extended_episode, keep_original=True)
 
                             episodes.append(episode)
                 
@@ -1026,7 +1055,7 @@ class AnilistSyncDatabase(Database):
         ]
 
     def _pull_show_seasons(self, show_id, mill_episodes=False):
-        show_id = control.get_item_information(show_id)['trakt_id']
+        show_id = tools.get_item_information(show_id)['trakt_id']
         return {
             show_id: self.trakt_api2.get_json(
                 "/shows/{}/seasons".format(show_id),
@@ -1064,7 +1093,7 @@ class AnilistSyncDatabase(Database):
             args["trakt_season_id"] = get(
                 item, "trakt_season_id", info(item).get("trakt_season_id")
             )
-        return control.quote(json.dumps(args, sort_keys=True))
+        return tools.quote(json.dumps(args, sort_keys=True))
 
     def _queue_mill_tasks(self, func, args):
         for arg in args:

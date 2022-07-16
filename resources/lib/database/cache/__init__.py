@@ -2,18 +2,23 @@
 from __future__ import absolute_import, division, unicode_literals
 
 import abc
-import calendar
-import codecs
+import base64
 import collections
 import datetime
-import pickle
+import time
 import types
 from functools import reduce, wraps
 
-from resources.lib.ui import control
+from resources.lib.common import tools
 from resources.lib.database import Database
-from resources.lib.ui.exceptions import UnsupportedCacheParamException
-from resources.lib.ui.globals import g
+from resources.lib.modules.exceptions import UnsupportedCacheParamException
+from resources.lib.modules.globals import g
+
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+
 
 schema = {
     "cache": {
@@ -48,10 +53,18 @@ class CacheBase:
 
     @staticmethod
     def _get_timestamp(timedelta=None):
-        date_time = datetime.datetime.utcnow()
+        """
+        Get the current timestamp, optionally offsetting with a provided timedelta
+
+        :param timedelta: The time delta to apply
+        :type timedelta: datetime.timedelta
+        :return: The timestamp, offet by the time delta if provided
+        :rtype: float
+        """
+        time_stamp = time.time()
         if timedelta:
-            date_time = date_time + timedelta
-        return calendar.timegm(date_time.timetuple())
+            time_stamp = time_stamp + timedelta.total_seconds()
+        return time_stamp
 
     def _get_checksum(self, checksum):
         if not checksum and not self.global_checksum:
@@ -76,7 +89,7 @@ class CacheBase:
         """
 
     @abc.abstractmethod
-    def set(self, cache_id, data, checksum=None, expiration=datetime.timedelta(hours=24)):
+    def set(self, cache_id, data, checksum=None, expiration=None):
         """
         Stores new value in cache location
         :param cache_id: ID of cache to create
@@ -150,16 +163,20 @@ class Cache(CacheBase):
         return result
 
     def set(
-            self, cache_id, data, checksum=None, expiration=datetime.timedelta(hours=24)
+            self, cache_id, data, checksum=None, expiration=None
             ):
+
+        if expiration is None:
+            expiration = datetime.timedelta(hours=24)
+
         checksum = self._get_checksum(checksum)
         if self.enable_mem_cache and not self._exit:
             self._mem_cache.set(cache_id, data, checksum, expiration)
         if not self._exit:
             self._db_cache.set(cache_id, data, checksum, expiration)
 
-    def _cleanup_required_check(self, lastexecuted, cur_time):
-        return (eval(lastexecuted) + self._auto_clean_interval) < cur_time
+    def _cleanup_required_check(self, lastexecuted, cur_timestamp):
+        return lastexecuted == 0 or lastexecuted + self._auto_clean_interval.total_seconds() <= cur_timestamp
 
     def check_cleanup(self):
         """
@@ -167,26 +184,22 @@ class Cache(CacheBase):
         :return:
         :rtype:
         """
-        cur_time = datetime.datetime.utcnow()
-        lastexecuted = g.get_runtime_setting(self._create_key("clean.lastexecuted"))
-        if not lastexecuted:
-            g.set_runtime_setting(self._create_key("clean.lastexecuted"), repr(cur_time))
-        elif self._cleanup_required_check(lastexecuted, cur_time):
+        cur_timestamp = CacheBase._get_timestamp()
+        lastexecuted = g.get_float_runtime_setting(self._create_key("clean.lastexecuted"))
+        if self._cleanup_required_check(lastexecuted, cur_timestamp):
             self.do_cleanup()
 
     def do_cleanup(self):
         if self._exit or g.abort_requested():
             return
-        if g.get_runtime_setting(self._create_key("clean.busy")):
+        if g.get_bool_runtime_setting(self._create_key("clean.busy")):
             return
-        g.set_runtime_setting(self._create_key("clean.busy"), "busy")
-
-        cur_time = datetime.datetime.utcnow()
+        g.set_runtime_setting(self._create_key("clean.busy"), True)
 
         self._db_cache.do_cleanup()
         self._mem_cache.do_cleanup()
 
-        g.set_runtime_setting(self._create_key("clean.lastexecuted"), repr(cur_time))
+        g.set_runtime_setting(self._create_key("clean.lastexecuted"), CacheBase._get_timestamp())
         g.clear_runtime_setting(self._create_key("clean.busy"))
 
     def clear_all(self):
@@ -217,30 +230,26 @@ class DatabaseCache(Database, CacheBase):
     def do_cleanup(self):
         if self._exit or g.abort_requested():
             return
-        cur_time = datetime.datetime.utcnow()
-        if g.get_runtime_setting(self._create_key("cache.db.clean.busy")):
+        if g.get_bool_runtime_setting(self._create_key("db.clean.busy")):
             return
-        g.set_runtime_setting(self._create_key("cache.db.clean.busy"), "busy")
+        g.set_runtime_setting(self._create_key("db.clean.busy"), True)
         query = "DELETE FROM {} where expires < ?".format(self.cache_table_name)
         self.execute_sql(query, (self._get_timestamp(),))
-        g.set_runtime_setting(self._create_key("cache.mem.clean.busy"), repr(cur_time))
-        g.clear_runtime_setting(self._create_key("cache.mem.clean.busy"))
+        g.clear_runtime_setting(self._create_key("db.clean.busy"))
 
     def get(self, cache_id, checksum=None):
         cur_time = self._get_timestamp()
-        query = "SELECT expires, data, checksum FROM {} WHERE id = ?".format(
-            self.cache_table_name
-        )
-        cache_data = self.fetchone(query, (cache_id,))
-        if (
-                cache_data
-                and cache_data["expires"] > cur_time
-                and (not checksum or cache_data["checksum"] == checksum)
-        ):
+        query = "SELECT expires, data, checksum FROM {} WHERE id = ? AND expires > ? " \
+                "AND (checksum IS NULL OR checksum = ?)".format(self.cache_table_name)
+        cache_data = self.fetchone(query, (cache_id, cur_time, checksum))
+        if cache_data:
             return cache_data["data"]
         return self.NOT_CACHED
 
-    def set(self, cache_id, data, checksum=None, expiration=datetime.timedelta(hours=24)):
+    def set(self, cache_id, data, checksum=None, expiration=None):
+        if expiration is None:
+            expiration = datetime.timedelta(hours=24)
+
         expires = self._get_timestamp(expiration)
         query = "INSERT OR REPLACE INTO {}( id, expires, data, checksum) " \
                 "VALUES (?, ?, ?, ?)".format(self.cache_table_name)
@@ -282,7 +291,7 @@ class MemCache(CacheBase):
         cached = g.get_runtime_setting(cache_id)
         cur_time = self._get_timestamp()
         if cached:
-            cached = pickle.loads(codecs.decode(cached.encode(), "base64"))
+            cached = pickle.loads(base64.standard_b64decode(cached.encode()))
             if cached[0] > cur_time:
                 if not checksum or checksum == cached[2]:
                     return cached[1]
@@ -290,14 +299,15 @@ class MemCache(CacheBase):
                 g.clear_runtime_setting(cache_id)
         return self.NOT_CACHED
 
-    def set(
-            self, cache_id, data, checksum=None, expiration=datetime.timedelta(hours=24)
-            ):
+    def set(self, cache_id, data, checksum=None, expiration=None):
+        if expiration is None:
+            expiration = datetime.timedelta(hours=24)
+
         expires = self._get_timestamp(expiration)
         cached = (expires, data, checksum)
         g.set_runtime_setting(
             cache_id,
-            codecs.encode(pickle.dumps(cached), "base64").decode(),
+            base64.standard_b64encode(pickle.dumps(cached)).decode(),
             )
         self._get_index()
         self._index.add((cache_id, expires))
@@ -306,19 +316,17 @@ class MemCache(CacheBase):
     def do_cleanup(self):
         if self._exit or g.abort_requested():
             return
-        cur_time = datetime.datetime.utcnow()
         cur_timestamp = self._get_timestamp()
-        if g.get_runtime_setting(self._create_key("cache.mem.clean.busy")):
+        if g.get_bool_runtime_setting(self._create_key("mem.clean.busy")):
             return
-        g.set_runtime_setting(self._create_key("cache.mem.clean.busy"), "busy")
+        g.set_runtime_setting(self._create_key("mem.clean.busy"), True)
 
         self._get_index()
         for cache_id, expires in self._index:
             if expires < cur_timestamp:
                 g.clear_runtime_setting(cache_id)
 
-        g.set_runtime_setting(self._create_key("cache.mem.clean.busy"), repr(cur_time))
-        g.clear_runtime_setting(self._create_key("cache.mem.clean.busy"))
+        g.clear_runtime_setting(self._create_key("mem.clean.busy"))
 
     def clear_all(self):
         self._get_index()
@@ -362,23 +370,27 @@ def use_cache(cache_hours=12):
                 if isinstance(v, types.GeneratorType):
                     raise UnsupportedCacheParamException("generator")
 
-            try:
-                global_cache_ignore = g.get_runtime_setting("ignore.cache")
-            except Exception:
-                global_cache_ignore = False
-            checksum = _get_checksum(method_class.__class__.__name__, func.__name__)
+            if func.__name__ == "get_sources":
+                overwrite_cache = kwargs.get("overwrite_cache", False)
+                kwargs_cache_value = {k: v for k, v in kwargs.items() if not k == "overwrite_cache"}
+            else:
+                overwrite_cache = kwargs.pop("overwrite_cache", False)
+                kwargs_cache_value = kwargs
+
+            hours = kwargs.pop("cache_hours", cache_hours)
+            global_cache_ignore = g.get_bool_runtime_setting("ignore.cache", False)
             ignore_cache = kwargs.pop("ignore_cache", False)
             if ignore_cache or global_cache_ignore:
                 return func(*args, **kwargs)
-            overwrite_cache = kwargs.pop("overwrite_cache", False)
-            hours = kwargs.pop("cache_hours", cache_hours)
+
+            checksum = _get_checksum(method_class.__class__.__name__, func.__name__)
             cache_str = "{}.{}.{}.{}".format(
                 method_class.__class__.__name__,
                 func.__name__,
-                control.md5_hash(args[1:]),
-                control.md5_hash(kwargs))
-            cached_data = g.CACHE.get(cache_str, checksum=checksum)
-            if cached_data == CacheBase.NOT_CACHED or overwrite_cache:
+                tools.md5_hash(args[1:]),
+                tools.md5_hash(kwargs_cache_value))
+            cached_data = g.CACHE.get(cache_str, checksum=checksum) if not overwrite_cache else CacheBase.NOT_CACHED
+            if cached_data == CacheBase.NOT_CACHED:
                 fresh_result = func(*args, **kwargs)
                 if func.__name__ == "get_sources" and (not fresh_result or len(fresh_result[1]) == 0):
                     return fresh_result

@@ -8,14 +8,12 @@ from abc import ABCMeta, abstractmethod
 from contextlib import contextmanager
 from functools import wraps
 
-import mysql.connector
 import xbmcvfs
-from requests import Response
 
-from resources.lib.ui import control
-from resources.lib.ui.exceptions import RanOnceAlready
-from resources.lib.ui.global_lock import GlobalLock
-from resources.lib.ui.globals import g
+from resources.lib.common import tools
+from resources.lib.modules.exceptions import RanOnceAlready
+from resources.lib.modules.global_lock import GlobalLock
+from resources.lib.modules.globals import g
 
 try:
     import cPickle as pickle
@@ -41,6 +39,7 @@ def _handle_single_item_or_list(func):
 @_handle_single_item_or_list
 def _dumps(obj):
     """Pickling method.
+
     :param obj:Object to be pickled
     :type obj:any
     :return:Bytes with the pickled content
@@ -48,13 +47,16 @@ def _dumps(obj):
     """
     if obj is None:
         return None
-
-    return tuple(sqlite3.Binary(pickle.dumps(i, protocol=pickle.HIGHEST_PROTOCOL))
-                 if isinstance(i, PICKLE_TYPES) else i for i in obj)
+    return tuple(
+        sqlite3.Binary(pickle.dumps(i, protocol=pickle.HIGHEST_PROTOCOL))
+        if i.__class__.__name__ in PICKLE_TYPES else i
+        for i in obj
+    )
 
 
 def _loads(value):
     """ Depickling method.
+
     :param value:Bytes with the pickled object
     :type value:str|bytes
     :return:Depickled value
@@ -69,13 +71,13 @@ def _loads(value):
         return value
 
 
-PICKLE_TYPES = (
-    list,
-    set,
-    dict,
-    tuple,
-    Response
-)
+PICKLE_TYPES = {
+    "list",
+    "set",
+    "dict",
+    "tuple",
+    "Response"
+}
 
 
 class Database(object):
@@ -103,12 +105,21 @@ class Database(object):
                 table_name, (",".join(table_data))
             )
         )
-        if len(data["default_seed"]) == 0:
+        indices = data.get("indices")
+        if indices and len(indices) > 0:
+            for index_name, columns in indices:
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS [{}] ON {}({})".format(
+                        index_name, table_name, (",".join(columns))
+                    )
+                )
+        default_seed = data["default_seed"]
+        if not default_seed or len(default_seed) == 0:
             return
         query = "INSERT OR IGNORE INTO [{}] ({}) VALUES ({})".format(
             table_name,
-            ",".join(data["columns"].keys()),
-            ",".join(["?" for i in data["columns"].keys()]),
+            ",".join(data["columns"]),
+            ",".join(["?" for i in data["columns"]]),
         )
         for row_values in (tuple(row) for row in data["default_seed"]):
             connection.execute(query, row_values)
@@ -118,7 +129,7 @@ class Database(object):
         return "{} {}".format(column_name, " ".join(column_declaration))
 
     def _integrity_check_db(self):
-        db_file_checksum = control.md5_hash(self._database_layout)
+        db_file_checksum = tools.md5_hash(self._database_layout)
         try:
             with GlobalLock(self.__class__.__name__, True, db_file_checksum):
                 if xbmcvfs.exists(self._db_file) and g.read_all_text("{}.md5".format(self._db_file)) == db_file_checksum:
@@ -321,7 +332,12 @@ class SQLiteConnection(_connection):
 
     @staticmethod
     def _set_connection_settings(connection):
-        connection.row_factory = lambda c, r: dict([(col[0], _loads(r[idx])) for idx, col in enumerate(c.description)])
+        connection.row_factory = lambda c, r: dict(
+            [
+                (col[0], _loads(r[idx]) if isinstance(r[idx], pickletype) else r[idx])
+                for idx, col in enumerate(c.description)
+            ]
+        )
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA page_size = 32768")  # no-translate
         connection.execute("PRAGMA journal_mode = WAL")
@@ -335,6 +351,8 @@ class SQLiteConnection(_connection):
 
 
 class MySqlConnection(_connection):
+    from resources.lib.common.tools import cached_property
+
     def __init__(self, config):
         super(MySqlConnection, self).__init__(keep_alive=True)
         self.config = {
@@ -348,64 +366,26 @@ class MySqlConnection(_connection):
             'use_unicode': True
         }
 
+    @cached_property
+    def mysql(self):
+        import mysql.connector
+        return mysql.connector
+
+    @cached_property
+    def MySQLCursorDict(self):
+        from resources.lib.database.mysql_cursor_dict import MySQLCursorDict
+        return MySQLCursorDict
+
     def _create_connection(self):
-        return mysql.connector.connect(**self.config)
+        return self.mysql.connect(**self.config)
 
     def _create_cursor(self):
-        return self._connection.cursor(cursor_class=MySQLCursorDict)
+        return self._connection.cursor(cursor_class=self.MySQLCursorDict)
 
     def _retry_handler(self, exception):
         super(MySqlConnection, self)._retry_handler(exception)
 
 
-class MySQLCursorDict(mysql.connector.connection.MySQLCursor):
-    """
-    Cursor fetching rows as dictionaries.
-    The fetch methods of this class will return dictionaries instead of tuples.
-    Each row is a dictionary that looks like:
-        row = {
-            "col1": value1,
-            "col2": value2
-        }
-    """
-    ERR_NO_RESULT_TO_FETCH = "No result set to fetch from"
-
-    def _row_to_python(self, rowdata, desc=None):
-        """Convert a MySQL text result row to Python types
-        Returns a dictionary.
-        """
-        row = rowdata
-
-        if row:
-            return dict(zip(self.column_names, row))
-
-        return None
-
-    def fetchone(self):
-        """Returns next row of a query result set
-        """
-        row = self._fetch_row()
-        if row:
-            return self._row_to_python(row, self.description)
-        return None
-
-    def fetchall(self):
-        """Returns all rows of a query result set
-        """
-        if not self._have_unread_result():
-            raise mysql.connector.errors.InterfaceError(self.ERR_NO_RESULT_TO_FETCH)
-        (rows, eof) = self._connection.get_rows()
-        if self._nextrow[0]:
-            rows.insert(0, self._nextrow[0])
-        res = []
-        for row in rows:
-            res.append(self._row_to_python(row, self.description))
-        self._handle_eof(eof)
-        rowcount = len(rows)
-        if rowcount >= 0 and self._rowcount == -1:
-            self._rowcount = 0
-        self._rowcount += rowcount
-        return res
 
 
 class TempTable:

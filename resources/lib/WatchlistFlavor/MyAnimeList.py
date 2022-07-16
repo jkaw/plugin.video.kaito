@@ -5,12 +5,9 @@ standard_library.install_aliases()
 from builtins import str
 from builtins import map
 import re
-import bs4 as bs
-import itertools
-import json
 import time
 import requests
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from .WatchlistFlavorBase import WatchlistFlavorBase
 
 class MyAnimeListWLF(WatchlistFlavorBase):
@@ -97,7 +94,7 @@ class MyAnimeListWLF(WatchlistFlavorBase):
                 action='watchlist_status_type',
                 action_args={"flavor": "mal", "status": status}
             )
-        g.close_directory(g.CONTENT_FOLDER)
+        g.close_directory(g.CONTENT_MENU)
 
     def __mal_statuses(self):
         statuses = [
@@ -160,6 +157,19 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
         all_results = list(map(self._base_watchlist_status_view, results['data']))
 
+        from ..database.anilist_sync import shows
+        anime_list_key = ('data', 'Page', 'media')
+        variables = {
+            'page': g.PAGE,
+            'idMal': []
+        }
+        for x in results['data']:
+            variables['idMal'].append(x['node']['id'])
+        shows.AnilistSyncDatabase().extract_trakt_page(
+            "https://graphql.anilist.co", query_path="anime/specificidmal", variables=variables,
+            dict_key=anime_list_key, page=1, cached=0
+        )
+
         page = self._handle_paging(results['paging'].get('next'), status, page)
 
         g.close_directory(g.CONTENT_SHOW)
@@ -188,10 +198,10 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
         if res['node']['media_type'] == 'movie' and res['node']["num_episodes"] == 1:
             info['mediatype'] = 'movie'
-            action = 'show_seasons'
+            action = 'playMovie'
         else:
             info['mediatype'] = 'tvshow'
-            action = 'mal_season_episodes'
+            action = 'malSeasonEpisodes'
 
         image = res['node']['main_picture'].get('large', res['node']['main_picture']['medium'])
 
@@ -208,12 +218,21 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
         name = '%s - %s/%s' % (res['node']["title"], res['list_status']["num_episodes_watched"], res['node']["num_episodes"])
 
-        g.add_directory_item(
-            name,
-            action=action,
-            action_args={"mal_id": res['node']['id']},
-            menu_item=menu_item
-        )
+        if res['node']['media_type'] == 'movie' and res['node']["num_episodes"] == 1:
+            g.add_directory_item(
+                name,
+                action=action,
+                action_args={"mal_id": res['node']['id']},
+                menu_item=menu_item,
+                is_movie=True
+            )
+        else:
+            g.add_directory_item(
+                name,
+                action=action,
+                action_args={"mal_id": res['node']['id']},
+                menu_item=menu_item
+            )
 
         # base = {
         #     "name": '%s - %s/%s' % (res['node']["title"], res['list_status']["num_episodes_watched"], res['node']["num_episodes"]),
@@ -295,6 +314,7 @@ class MyAnimeListWLF(WatchlistFlavorBase):
 
     def watchlist_update(self, anilist_id, episode):
         mal_id = self._get_mapping_id(anilist_id, 'mal_id')
+
         if not mal_id:
             return
 

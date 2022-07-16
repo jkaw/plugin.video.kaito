@@ -1,7 +1,7 @@
 import threading
 from . import nyaa, gogoanime, animixplay, debrid_cloudfiles
-from ..ui.globals import g
-from resources.lib.windows.get_sources_window import GetSources as DisplayWindow
+from ..modules.globals import g
+from resources.lib.gui.windows.get_sources_window import GetSources as DisplayWindow
 import time
 
 class CancelProcess(Exception):
@@ -175,6 +175,9 @@ class Sources(DisplayWindow):
             if g.premiumize_enabled() and g.get_setting('premiumize.cloudInspection') == 'true':
                 debrid['premiumize'] = True
 
+            if g.all_debrid_enabled() and g.get_setting('alldebrid.cloudInspection') == 'true':
+                debrid['all_debrid'] = True
+
             self.usercloudSources = debrid_cloudfiles.sources().get_sources(debrid, query, episode, anilist_id)
             self.cloud_files += self.usercloudSources
 
@@ -272,6 +275,7 @@ class Sources(DisplayWindow):
 
         if g.get_setting('general.hidedub') == 'true':
             sortedList = [i for i in sortedList if i['lang'] != 2]
+
         return sortedList
 
     def colorNumber(self, number):

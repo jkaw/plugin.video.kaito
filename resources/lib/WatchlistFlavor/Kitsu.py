@@ -4,11 +4,8 @@ from future import standard_library
 standard_library.install_aliases()
 from builtins import str
 from builtins import map
-import itertools
-import json
-import ast
 import time
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from .WatchlistFlavorBase import WatchlistFlavorBase
 
 class KitsuWLF(WatchlistFlavorBase):
@@ -107,7 +104,7 @@ class KitsuWLF(WatchlistFlavorBase):
                 action='watchlist_status_type',
                 action_args={"flavor": "kitsu", "status": status}
             )
-        g.close_directory(g.CONTENT_FOLDER)
+        g.close_directory(g.CONTENT_MENU)
 
     def __kitsu_statuses(self):
         statuses = [
@@ -161,7 +158,23 @@ class KitsuWLF(WatchlistFlavorBase):
 
     def _process_watchlist_view(self, url, params, status, page):
         result = (self._get_request(url, headers=self.__headers(), params=params)).json()
+        self._mapping = [x for x in result['included'] if x['type'] == 'mappings']
+        ret = result["included"]
+        kitsu_ids = []
+        for x in ret:
+            kitsu_ids.append(x['id'])
+        mal_ids = self.get_mal_mappings(kitsu_ids)
         _list = result["data"]
+        anime_list_key = ('data', 'Page', 'media')
+        variables = {
+            'page': g.PAGE,
+            'idMal': list(mal_ids.values())
+        }
+        from ..database.anilist_sync import shows
+        shows.AnilistSyncDatabase().extract_trakt_page(
+            "https://graphql.anilist.co", query_path="anime/specificidmal", variables=variables,
+            dict_key=anime_list_key, page=1, cached=0
+        )
         el = result["included"][:len(_list)]
         self._mapping = [x for x in result['included'] if x['type'] == 'mappings']
 
@@ -199,10 +212,10 @@ class KitsuWLF(WatchlistFlavorBase):
 
         if eres['attributes']['subtype'] == 'movie' and eres['attributes']['episodeCount'] == 1:
             info['mediatype'] = 'movie'
-            action = 'show_seasons'
+            action = 'playMovie'
         else:
             info['mediatype'] = 'tvshow'
-            action = 'mal_season_episodes'
+            action = 'malSeasonEpisodes'
 
         image = eres["attributes"]['posterImage']['large']
 
@@ -223,12 +236,21 @@ class KitsuWLF(WatchlistFlavorBase):
             eres["attributes"].get('episodeCount', 0)
         )
 
-        g.add_directory_item(
-            name,
-            action=action,
-            action_args={"mal_id": mal_id},
-            menu_item=menu_item
-        )
+        if eres['attributes']['subtype'] == 'movie' and eres['attributes']['episodeCount'] == 1:
+            g.add_directory_item(
+                name,
+                action=action,
+                action_args={"mal_id": mal_id},
+                menu_item=menu_item,
+                is_movie=True
+            )
+        else:
+            g.add_directory_item(
+                name,
+                action=action,
+                action_args={"mal_id": mal_id},
+                menu_item=menu_item
+            )
 
         # base = {
         #     "name": '%s - %d/%d' % (eres["attributes"]["titles"].get(self.__get_title_lang(), eres["attributes"]['canonicalTitle']),
@@ -350,10 +372,10 @@ class KitsuWLF(WatchlistFlavorBase):
         scrobble = self._get_request(url, headers=self.__headers(), params=params)
         item_dict = scrobble.json()
         if len(item_dict['data']) == 0:
-            return lambda: self.__post_params(url, episode, kitsu_id)
+            return self.__post_params(url, episode, kitsu_id)
 
         animeid = item_dict['data'][0]['id']
-        return lambda: self.__patch_params(url, animeid, episode)
+        return self.__patch_params(url, animeid, episode)
 
     def __post_params(self, url, episode, kitsu_id):
         params = {

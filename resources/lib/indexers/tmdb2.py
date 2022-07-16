@@ -11,11 +11,11 @@ import xbmcgui
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from resources.lib.ui import control
+from resources.lib.common import tools
 from resources.lib.database.cache import use_cache
 from resources.lib.database.anilist_sync import shows
 from resources.lib.indexers.apibase import ApiBase, handle_single_item_or_list
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 
 
 def tmdb_guard_response(func):
@@ -75,7 +75,7 @@ class TMDBAPI(ApiBase):
     imageBaseUrl = "https://image.tmdb.org/t/p/"
 
     normalization = [
-        ("overview", ("plot", "overview", "plotoutline"), lambda t: control.ignore_ascii(t)),
+        ("overview", ("plot", "overview", "plotoutline"), lambda t: tools.ignore_ascii(t)),
         ("air_date", ("premiered", "aired"), lambda t: g.validate_date(t)),
         (
             "keywords",
@@ -101,7 +101,7 @@ class TMDBAPI(ApiBase):
             "rating.tmdb",
             (
                 ("vote_average", "vote_count"),
-                lambda a, c: {"rating": control.safe_round(a, 2), "votes": c},
+                lambda a, c: {"rating": tools.safe_round(a, 2), "votes": c},
             ),
         ),
         ("tagline", "tagline", None),
@@ -125,7 +125,7 @@ class TMDBAPI(ApiBase):
         ("mediatype", "mediatype", None),
     ]
 
-    show_normalization = control.extend_array(
+    show_normalization = tools.extend_array(
         [
             ("name", ("tite", "tvshowtitle", "sorttitle"), None),
             ("original_name", "originaltitle", None),
@@ -173,7 +173,7 @@ class TMDBAPI(ApiBase):
         normalization,
     )
 
-    season_normalization = control.extend_array(
+    season_normalization = tools.extend_array(
         [
             ("name", ("title", "sorttitle"), None),
             ("season_number", ("season", "sortseason"), None),
@@ -205,11 +205,11 @@ class TMDBAPI(ApiBase):
         normalization,
     )
 
-    episode_normalization = control.extend_array(
+    episode_normalization = tools.extend_array(
         [
-            ("name", ("title", "sorttitle"), lambda t: control.ignore_ascii(t)),
+            ("name", ("title", "sorttitle"), lambda t: tools.ignore_ascii(t)),
             ("args", "args", None),
-            ("tvshowtitle", "tvshowtitle", lambda t: control.ignore_ascii(t)),
+            ("tvshowtitle", "tvshowtitle", lambda t: tools.ignore_ascii(t)),
             ("episode_number", ("episode", "sortepisode"), None),
             ("season_number", ("season", "sortseason"), None),
             (
@@ -234,7 +234,7 @@ class TMDBAPI(ApiBase):
         normalization,
     )
 
-    movie_normalization = control.extend_array(
+    movie_normalization = tools.extend_array(
         [
             ("title", ("title", "sorttitle"), None),
             ("original_title", "originaltitle", None),
@@ -308,7 +308,7 @@ class TMDBAPI(ApiBase):
             ("stills", "fanart", None),
         ]
 
-        self.meta_hash = control.md5_hash(
+        self.meta_hash = tools.md5_hash(
             (
                 self.lang_code,
                 self.lang_full_code,
@@ -355,7 +355,7 @@ class TMDBAPI(ApiBase):
     def get(self, url, **params):
         timeout = params.pop("timeout", 10)
         return self.session.get(
-            control.urljoin(self.baseUrl, url),
+            tools.urljoin(self.baseUrl, url),
             params=self._add_api_key(params),
             headers={"Accept": "application/json"},
             timeout=timeout,
@@ -398,15 +398,15 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_movie_rating(self, tmdb_id):
-        result = control.filter_dictionary(
-            control.safe_dict_get(self.get_json_cached("movie/{}".format(tmdb_id)), "info"),
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(self.get_json_cached("movie/{}".format(tmdb_id)), "info"),
             "rating",
         )
         return {"info": result} if result else None
 
     @wrap_tmdb_object
     def get_movie_cast(self, tmdb_id):
-        result = control.safe_dict_get(
+        result = tools.safe_dict_get(
             self.get_json_cached("movie/{}/credits".format(tmdb_id)), "cast"
         )
         return {"cast": result} if result else None
@@ -437,15 +437,15 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_show_rating(self, tmdb_id):
-        result = control.filter_dictionary(
-            control.safe_dict_get(self.get_json_cached("tv/{}".format(tmdb_id)), "info"),
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(self.get_json_cached("tv/{}".format(tmdb_id)), "info"),
             "rating",
         )
         return {"info": result} if result else None
 
     @wrap_tmdb_object
     def get_show_cast(self, tmdb_id):
-        result = control.safe_dict_get(
+        result = tools.safe_dict_get(
             self.get_json_cached("tv/{}/credits".format(tmdb_id)), "cast"
         )
         return {"cast": result} if result else None
@@ -566,7 +566,7 @@ class TMDBAPI(ApiBase):
             "trakt_season_id": None,
             "indexer": "tmdb",
         }
-        return control.quote(json.dumps(args, sort_keys=True))
+        return tools.quote(json.dumps(args, sort_keys=True))
 
     def get_season(self, anilist_id, item_information):
         info = self.anilist_id_to_tmdb_id(anilist_id)
@@ -680,8 +680,8 @@ class TMDBAPI(ApiBase):
 
     @wrap_tmdb_object
     def get_episode_rating(self, tmdb_id, season, episode):
-        result = control.filter_dictionary(
-            control.safe_dict_get(
+        result = tools.filter_dictionary(
+            tools.safe_dict_get(
                 self.get_json_cached(
                     "tv/{}/season/{}/episode/{}".format(tmdb_id, season, episode)
                 ),
@@ -751,7 +751,7 @@ class TMDBAPI(ApiBase):
                 and t["type"] == "Trailer"
             ):
                 if t.get("key"):
-                    item.update({"trailer": control.youtube_url.format(t["key"])})
+                    item.update({"trailer": tools.youtube_url.format(t["key"])})
                     return True
         return False
 
@@ -916,7 +916,7 @@ class TMDBAPI(ApiBase):
                 ),
             }
             for idx, item in enumerate(
-                control.extend_array(
+                tools.extend_array(
                     sorted(cast.get("cast", []), key=lambda k: k["order"],),
                     sorted(cast.get("guest_stars", []), key=lambda k: k["order"]),
                 )

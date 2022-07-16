@@ -3,20 +3,19 @@ from __future__ import absolute_import, division, unicode_literals
 
 from functools import wraps
 
-import requests
 import xbmcgui
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-from resources.lib.ui import control
+from resources.lib.common import tools
+from resources.lib.common.tools import cached_property
 from resources.lib.database.cache import use_cache
 from resources.lib.indexers.apibase import ApiBase, handle_single_item_or_list
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 
 
 def fanart_guard_response(func):
     @wraps(func)
     def wrapper(*args, **kwarg):
+        import requests
         try:
             response = func(*args, **kwarg)
             if response.status_code in [200, 201]:
@@ -33,7 +32,7 @@ def fanart_guard_response(func):
         except requests.exceptions.ConnectionError:
             return None
         except Exception:
-            xbmcgui.Dialog().notification(g.ADDON_NAME, g.get_language_string(30025).format('Fanart'))
+            xbmcgui.Dialog().notification(g.ADDON_NAME, g.get_language_string(30024).format('Fanart'))
             if g.get_runtime_setting("run.mode") == "test":
                 raise
             else:
@@ -53,7 +52,7 @@ def wrap_fanart_object(func):
 
 class FanartTv(ApiBase):
     base_url = "https://webservice.fanart.tv/v3/"
-    api_key = "5e654408dff6973c9a2aca99febae8dd"
+    api_key = "dfe6380e34f49f9b2b9518184922b49c"
 
     http_codes = {
         200: 'Success',
@@ -65,7 +64,7 @@ class FanartTv(ApiBase):
                      ('art', 'art', None)
                      ]
 
-    show_normalization = control.extend_array([
+    show_normalization = tools.extend_array([
         ('thetvdb_id', 'tvdb_id', None),
     ], normalization)
     meta_objects = {'movie': normalization,
@@ -78,18 +77,27 @@ class FanartTv(ApiBase):
         self.fanart_support = False if not self.client_key else True
         self.headers = {'client-key': self.client_key, 'api-key': self.api_key}
 
-        self.meta_hash = control.md5_hash(
-            [self.language, self.fanart_support, self.normalization, self.show_normalization, self.meta_objects,
+    @cached_property
+    def meta_hash(self):
+        return tools.md5_hash(
+            [self.language,
+             self.fanart_support,
+             self.normalization,
+             self.show_normalization,
+             self.meta_objects,
              self.base_url])
 
-        self.session = requests.Session()
+    @cached_property
+    def session(self):
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3 import Retry
+        session = requests.Session()
         retries = Retry(total=5,
                         backoff_factor=0.1,
                         status_forcelist=[500, 502, 503, 504])
-        self.session.mount('https://', HTTPAdapter(max_retries=retries))
-
-    def __del__(self):
-        self.session.close()
+        session.mount('https://', HTTPAdapter(max_retries=retries, pool_maxsize=100))
+        return session
 
     @staticmethod
     def build_image(url, art, image):
@@ -130,7 +138,7 @@ class FanartTv(ApiBase):
         if not self.fanart_support:
             return None
         timeout = params.pop("timeout", 10)
-        return self.session.get(control.urljoin(self.base_url, url), params=params, headers=self.headers, timeout=timeout)
+        return self.session.get(tools.urljoin(self.base_url, url), params=params, headers=self.headers, timeout=timeout)
 
     def _get_json(self, url, **params):
         response = self._get(url, **params)

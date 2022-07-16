@@ -2,8 +2,8 @@
 from builtins import object
 import requests
 import ast
-from ..ui import database
-from resources.lib.ui.globals import g
+from ..modules import kaito_database as database
+from resources.lib.modules.globals import g
 from resources.lib.database.anilist_sync import shows
 from resources.lib.modules.list_builder import ListBuilder
 

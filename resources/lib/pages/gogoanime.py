@@ -1,20 +1,13 @@
 # -*- coding: utf-8 -*-
 from builtins import map
-from builtins import str
-import json
 import bs4 as bs
-import re
 import itertools
 from functools import partial
-from ..ui import source_utils
+from ..common import source_utils
 from resources.lib.database.cache import use_cache
-from resources.lib.ui.globals import g
-from ..ui.BrowserBase import BrowserBase
-from ..debrid import real_debrid, all_debrid
-from ..ui import database
+from resources.lib.modules.globals import g
+from ..modules.BrowserBase import BrowserBase
 import requests
-import threading
-import copy
 
 class sources(BrowserBase):
     def get_sources(self, anilist_id, episode, get_backup):

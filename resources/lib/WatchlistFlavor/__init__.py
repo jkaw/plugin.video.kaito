@@ -1,9 +1,7 @@
 from __future__ import absolute_import
 from builtins import str
 from builtins import object
-from time import time
-from ..ui import control
-from resources.lib.ui.globals import g
+from resources.lib.modules.globals import g
 from .WatchlistFlavorBase import WatchlistFlavorBase
 
 from . import MyAnimeList
@@ -136,11 +134,12 @@ class WatchlistFlavor(object):
 
     @staticmethod
     def __set_login(flavor, res, login_ts):
+        import xbmcgui
         if not res:
-            return control.ok_dialog('Login', 'Incorrect username or password')
+            return xbmcgui.Dialog().ok('Login', 'Incorrect username or password')
 
         for _id, value in list(res.items()):
             g.set_setting('%s.%s' % (flavor, _id), value)
 
         g.container_refresh()
-        return control.ok_dialog('Login', 'Success')
+        return xbmcgui.Dialog().ok('Login', 'Success')
